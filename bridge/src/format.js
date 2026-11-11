@@ -21,10 +21,22 @@ const GLYPHS = {
 };
 const GLYPH_RE = new RegExp(`[${Object.keys(GLYPHS).join('')}]`, 'gu');
 
+// The game's fonts draw Latin-1 letters (â î é ü ...) but not Latin Extended ones:
+// Romanian ă ș ț (and ş ţ), Czech ě ř, Polish ą ę ő ... show as boxes. Drop their
+// accents instead (ă -> a, ș -> s). Letters with no decomposition (ł đ ı) get a
+// plain stand-in.
+const LATIN_EXT_RE = /[Ā-ɏḀ-ỿ]/gu;
+const LATIN_EXT_PLAIN = { 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ı': 'i', 'ħ': 'h', 'Ħ': 'H', 'ŧ': 't', 'Ŧ': 'T', 'ŀ': 'l', 'Ŀ': 'L' };
+const foldLatinExt = (c) => LATIN_EXT_PLAIN[c] ?? c.normalize('NFD').replace(/\p{M}/gu, '');
+
 // WoW treats "|" as an escape character; double it so text can't inject markup.
 // Also swaps in stand-ins for characters the game can't draw.
 export function escapeWow(s) {
-  return String(s ?? '').replace(/\|/g, '||').replace(GLYPH_RE, (c) => GLYPHS[c]);
+  return String(s ?? '')
+    .normalize('NFC')
+    .replace(/\|/g, '||')
+    .replace(GLYPH_RE, (c) => GLYPHS[c])
+    .replace(LATIN_EXT_RE, foldLatinExt);
 }
 
 function inline(line) {
