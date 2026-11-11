@@ -6,7 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { StripCapture } from '../src/capture.js';
-import { decodeImage, encodeFrame } from '../src/codec.js';
+import { STRIP_INSET, decodeImage, encodeFrame } from '../src/codec.js';
 
 const at = process.platform === 'win32' && process.env.T3WOW_SCREEN_TEST;
 const asked = { skip: !at && 'it draws a window: on Windows, set T3WOW_SCREEN_TEST=x,y to say where' };
@@ -16,6 +16,9 @@ const SHOW = "$ErrorActionPreference = 'Stop'; Add-Type -LiteralPath $env:T3WOW_
 const CLIENT = { width: 700, height: 220 };
 const OVER_THE_CORNER = { x: -20, y: -20, width: 320, height: 140 };
 const TOOLTIP_SIZED = { x: 201, y: 22, width: 16, height: 16 };
+// Over only the strip's last cells, which the inset puts past the 480 pixels from the
+// corner the strip took when it was drawn in the corner itself.
+const OVER_THE_FAR_END = { x: 482, y: 12, width: 16, height: 16 };
 const HANG_MS = 8000;
 
 function showStrip(cells) {
@@ -47,7 +50,7 @@ function jpegSize(data) {
   return null;
 }
 
-test('a strip in a real window is read off the screen, and through the window while another covers it, even a 16x16 one', asked, async (t) => {
+test('a strip in a real window is read off the screen, and through the window while another covers it, even a 16x16 one at its far end', asked, async (t) => {
   const payload = Buffer.from('a real frame from encodeFrame, long enough to fill several rows of cells. '.repeat(8));
   const stage = showStrip(encodeFrame(4242, payload));
   try {
@@ -63,7 +66,7 @@ test('a strip in a real window is read off the screen, and through the window wh
         if (out && !out.error) {
           assert.equal(out.seq, 4242);
           assert.ok(out.payload.equals(payload), 'the payload comes back whole');
-          assert.deepEqual(out.geo, { ox: 0, oy: 0, cell: 3 }, 'the image starts at the top-left of the client area');
+          assert.deepEqual(out.geo, { ox: STRIP_INSET, oy: STRIP_INSET, cell: 3 }, 'the image starts at the top-left of the client area');
           return;
         }
         assert.ok(Date.now() < end, `the strip is read via the ${via} within 3 s (last grab: ${res.status} via the ${res.via})`);
@@ -97,6 +100,9 @@ test('a strip in a real window is read off the screen, and through the window wh
     await read('screen');
 
     cover(TOOLTIP_SIZED);
+    await read('window');
+
+    cover(OVER_THE_FAR_END);
     await read('window');
   } finally {
     stage.stdin.end();

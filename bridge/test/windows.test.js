@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { StripCapture } from '../src/capture.js';
+import { CELLS_PER_ROW, MAX_ROWS, STRIP_INSET } from '../src/codec.js';
 import { Desktop, launchHelper, pickWinWindow, splitFrames } from '../src/windows.js';
 
 const windowsOnly = { skip: process.platform !== 'win32' && 'needs Windows PowerShell' };
@@ -213,6 +215,16 @@ test('screenshot: the JPEG the helper made, or the reason there is none', async 
   const missing = fakeDesktop({ windows: [] });
   await assert.rejects(missing.desktop.screenshot(5), /find the game window/);
   missing.desktop.stop();
+});
+
+test('the helper places the strip where the addon draws it and the decoder looks, inside the corner the bridge grabs', () => {
+  const helper = fs.readFileSync(fileURLToPath(new URL('../src/windows-helper.cs', import.meta.url)), 'utf8');
+  const addon = fs.readFileSync(fileURLToPath(new URL('../../addon/T3Code/Core/Transport.lua', import.meta.url)), 'utf8');
+  const [cell, perRow, rows, inset] = helper.match(/const int CELL = (\d+), CELLS_PER_ROW = (\d+), MAX_ROWS = (\d+), INSET = (\d+);/).slice(1).map(Number);
+  assert.deepEqual([cell, perRow, rows, inset], [Number(addon.match(/^local CELL = (\d+)/m)[1]), CELLS_PER_ROW, MAX_ROWS, Number(addon.match(/^local INSET = (\d+)/m)[1])]);
+  assert.equal(inset, STRIP_INSET, 'where the decoder looks');
+  const grabbed = StripCapture.stripPixels(4);
+  assert.ok(inset + perRow * cell <= grabbed.width && inset + rows * cell <= grabbed.height, 'the whole strip is in what the bridge grabs');
 });
 
 test("the real helper compiles under Windows PowerShell 5.1 and finds this test's own process", windowsOnly, async () => {
