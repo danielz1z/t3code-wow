@@ -26,6 +26,11 @@ ns.Transport = T
 local SLOT_FMT = "T3Code_S%03d"
 local SIG_FMT = "Interface\\AddOns\\T3Code\\Signals\\%05d.wav"
 local CELL = 3 -- physical pixels per strip square
+-- Physical pixels between the strip and the game's top-left corner, across and down.
+-- Desktops that round window corners (Windows 11 tools, compositors) cut into that
+-- corner and draw a border along its edges. Clear of a corner rounded by up to about
+-- 34 pixels, and still where older bridges look for the strip.
+local INSET = 9
 local SIGNAL_POLL = 0.5
 local MIN_LOAD_GAP = 0.6
 local SHOW_FOR = 20 -- seconds a strip stays up without an acknowledgement
@@ -374,7 +379,7 @@ local function LayoutStrip()
 	local _, physH = GetPhysicalScreenSize()
 	s:SetScale(768 / (physH or 1080))
 	s:ClearAllPoints()
-	s:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+	s:SetPoint("TOPLEFT", UIParent, "TOPLEFT", INSET, -INSET)
 	s:SetSize(Codec.CELLS_PER_ROW * CELL, Codec.MAX_ROWS * CELL)
 end
 

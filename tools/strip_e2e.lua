@@ -1,6 +1,7 @@
 -- Load the addon against the stub with one slot file, queue a command, and print the
--- strip as drawn (one digit 0..7 per cell). bridge/test/crypto.test.js decodes it
--- with the bridge's code.
+-- strip as drawn (one digit 0..7 per cell), whether it is encrypted, and where its
+-- top-left corner is ("x,y" in physical pixels). bridge/test/crypto.test.js and
+-- codec.test.js decode it with the bridge's code.
 --   lua5.1|luajit tools/strip_e2e.lua <addon dir> <slot.lua> <thread id> <text>
 local addonDir, slotFile, threadId, text = arg[1], arg[2], arg[3], arg[4]
 local Stub = dofile("tools/wowstub.lua")
@@ -19,3 +20,4 @@ ns.viewId = threadId
 ns.Transport:Send("send", threadId, text, "auto")
 io.write(table.concat(Stub.StripCells()), "\n")
 io.write(ns.Transport:Encrypted() and "encrypted" or "plain", "\n")
+io.write(string.format("%d,%d", Stub.StripOrigin()), "\n")

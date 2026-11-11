@@ -70,9 +70,15 @@ drive T3 Code's UI directly. Only install addons you trust.
 
 The frame is packed into 3-bit cells. Each cell is a 3×3-pixel square with R, G and B
 each fully on or off. The strip is 160 cells per row and up to 40 rows (about 2.4 KB),
-scaled so one UI unit is one physical pixel. It is anchored at the top-left of
-`UIParent` on the TOOLTIP strata. The bridge searches cell sizes 2–8 and small offsets,
-so a border or scaling quirk doesn't break it.
+scaled so one UI unit is one physical pixel. It is anchored 9 physical pixels right of
+and below the top-left corner of `UIParent`, on the TOOLTIP strata. Desktops that round
+window corners cut into that corner and draw a border along its edges: Windows 11 rounds
+by 8 pixels at 100 percent scaling and 16 at 200 percent, and Linux compositors can be
+set to round too. 9 pixels in, the strip's first cell is clear of a corner rounded by
+up to about 34 pixels, and bridges from before the inset, which look up to 9 pixels in,
+still find it. The bridge searches cell sizes 2–8 and offsets from the corner to a
+little past the inset, so a border or scaling quirk doesn't break it, and a strip an
+older addon draws in the corner itself is found too.
 
 The payload is records separated by `RS` (0x1E), with fields separated by `US` (0x1F):
 

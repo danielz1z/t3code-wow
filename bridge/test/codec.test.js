@@ -1,9 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { encodeFrame, decodeImage, renderCells, cellsToBytes, bytesToCells, MAX_PAYLOAD, parsePPM, parseBMP, parseQImage } from '../src/codec.js';
+import { StripCapture } from '../src/capture.js';
+import { deriveKeys, open } from '../src/strip-crypto.js';
+import { luaAssignment } from '../src/luaser.js';
+import { roundCorner } from './rounded-corner.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const lua = ['lua5.1', 'luajit', 'lua'].find((bin) => {
@@ -87,6 +94,32 @@ test('Lua encoder matches JS encoder', { skip: !lua && 'no lua interpreter' }, (
   const fromLua = luaCells(65537, payload.toString('hex'));
   const fromJs = encodeFrame(1, payload);
   assert.deepEqual(fromLua, fromJs);
+});
+
+// The strip the addon draws with its keys and a queued message: its cells and where its
+// top-left corner is, in physical pixels from the game's.
+function addonStrip(keys) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't3wow-slot-'));
+  const slot = path.join(dir, 'Inbox.lua');
+  fs.writeFileSync(slot, luaAssignment('T3Code_Inbox', { v: 1, gen: 5, now: 1, nextSig: 1, key: keys.hex, threads: [], projects: [], usage: [], bridge: {} }));
+  const [cells, , origin] = execFileSync(lua, ['tools/strip_e2e.lua', 'addon/T3Code', slot, 'thread-42', 'run the tests'], { cwd: root }).toString().trim().split('\n');
+  fs.rmSync(dir, { recursive: true, force: true });
+  const [ox, oy] = origin.split(',').map(Number);
+  return { cells: [...cells].map(Number), ox, oy };
+}
+
+test('the strip the addon draws is read through a window corner the desktop rounds, at 100 to 200 percent scaling', { skip: !lua && 'no lua interpreter' }, () => {
+  const keys = deriveKeys(crypto.randomBytes(32));
+  const { cells, ox, oy } = addonStrip(keys);
+  assert.ok(cells.length > 2 * 160, 'a frame of several rows');
+  const { width, height } = StripCapture.stripPixels(4);
+  for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
+    const corner = (x, y) => roundCorner(renderCells(cells, { cell: 3, ox: x, oy: y, width, height, background: [40, 90, 60] }), 8 * scale);
+    assert.equal(decodeImage(corner(0, 0)), null, `drawn in the very corner, the strip is lost at ${scale * 100}%`);
+    const out = decodeImage(corner(ox, oy));
+    assert.ok(out && !out.error, `read at ${scale * 100}%: ${out ? out.error : 'no strip found'}`);
+    assert.equal(open(keys, out.seq, out.payload).toString().split('\x1e').at(-1), 'C\x1f1\x1fsend\x1fthread-42\x1frun the tests\x1fauto');
+  }
 });
 
 test('parse ppm', () => {
