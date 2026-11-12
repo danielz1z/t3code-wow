@@ -284,7 +284,9 @@ function UI.OpenList(owner)
 	end
 	l.owner = owner
 	l:ClearAllPoints()
-	if owner.listAlignRight then
+	if owner.listAbove then
+		l:SetPoint("BOTTOMLEFT", owner, "TOPLEFT", 0, 2)
+	elseif owner.listAlignRight then
 		l:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -2)
 	else
 		l:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -2)

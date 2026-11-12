@@ -14,6 +14,9 @@ local COMPOSER_H = 92
 M.page = "threads"
 M.mode = "thread" -- "thread" | "new"
 
+-- The bottom bar's buttons, left to right.
+M.BAR_KEYS = { "Refresh", "New", "Back", "Stop", "Mic", "Speak", "Shot", "Insert", "Send" }
+
 ---------------------------------------------------------------------------
 -- Frame
 
@@ -232,12 +235,19 @@ function M:CreateThreadsPage(page)
 	box:RegisterCallback("OnEnterPressed", function()
 		if IsShiftKeyDown() then
 			box:Insert("\n")
-		else
+		elseif not ns.Suggest:Accept() then
 			M:Send()
 		end
 	end, M)
-	box:RegisterCallback("OnTextChanged", function() M:UpdateCounter() ns.Interacted() end, M)
-	box:RegisterCallback("OnEscapePressed", function() box:ClearFocus() end, M)
+	box:RegisterCallback("OnTextChanged", function(_, _, userChanged)
+		M:UpdateCounter()
+		ns.Interacted()
+		ns.Suggest:OnTextChanged(userChanged)
+	end, M)
+	box:RegisterCallback("OnEscapePressed", function()
+		if not ns.Suggest:Close() then box:ClearFocus() end
+	end, M)
+	ns.Suggest:Attach(box)
 	right.Composer = box
 	self.composer = box
 	self:SetPlaceholder("Message the agent  (Shift+Enter for a new line)")
@@ -307,6 +317,21 @@ function M:CreateButtonBar(f)
 	UI.Tooltip(bar.Shot, "Attach a screenshot", "Adds a screenshot of the game to your next message. Right-click to remove it. /t3 report also adds diagnostics.")
 	UI.Tooltip(bar.Speak, nil, "Read the latest reply aloud.")
 
+	-- The "/" and "$" suggestions as a list, for a controller, which can't type them.
+	-- It opens the shared list, so it carries what the list reads from its owner.
+	bar.Insert = UI.IconButton(f, "Interface\\Icons\\INV_Misc_Book_09", 26, nil, function(self) M:OpenCommandList(self) end)
+	bar.Insert:SetPoint("LEFT", bar.Shot, "RIGHT", 6, 0)
+	bar.Insert.options = {}
+	bar.Insert.listWidth = 360
+	bar.Insert.listAbove = true
+	bar.Insert.Update = function(self) self.value = nil end
+	bar.Insert.onChange = function(value) M:InsertCommand(value) end
+	UI.Tooltip(bar.Insert, "Insert a command or skill", function(self)
+		if self:IsEnabled() then return "Adds it to your message. Typing / or $ in the message box lists them too." end
+		if not M:NextProvider() then return "Pick a thread, or start a new one, first." end
+		return "The model this message goes to has no commands or skills."
+	end)
+
 	bar.Send = UI.Button(f, "Send", 110, function() M:Send() end)
 	bar.Send:SetPoint("BOTTOMRIGHT", -6, 4)
 	f.Bar = bar
@@ -321,7 +346,10 @@ function M:ShowPage(page)
 	for name, p in pairs(f.Pages) do p:SetShown(name == page) end
 	for _, tab in ipairs(f.Tabs) do tab:SetChecked(tab.page == page) end
 	local threads = page == "threads"
-	for _, key in ipairs({ "Back", "Stop", "Mic", "Speak", "Shot", "Send" }) do f.Bar[key]:SetShown(threads) end
+	for _, key in ipairs(M.BAR_KEYS) do
+		-- Refresh and New belong to the thread list: they follow the sidebar instead.
+		if key ~= "Refresh" and key ~= "New" then f.Bar[key]:SetShown(threads) end
+	end
 	f.SidebarToggle:SetShown(threads)
 	if page == "usage" then ns.Usage:Refresh() end
 	if page == "settings" then ns.Settings:Refresh() end
@@ -601,6 +629,41 @@ function M:Send(textOverride)
 	self:Refresh()
 end
 
+-- The next message's provider's commands and skills in the shared list, each group
+-- under its header.
+function M:OpenCommandList(button)
+	local list = ns.Store:Commands(self:NextProvider())
+	if not list then return end
+	local groups = { { label = "Commands", items = {} }, { label = "Skills", items = {} } }
+	for _, e in ipairs(list) do
+		local group = e.t:sub(1, 1) == "/" and groups[1] or groups[2]
+		table.insert(group.items, { value = e.t, label = e.d and (e.t .. "  " .. ns.Color("grey", e.d)) or e.t, group = group.label })
+	end
+	local options = {}
+	for _, group in ipairs(groups) do
+		if #group.items > 0 then
+			table.insert(options, { header = true, label = group.label })
+			for _, o in ipairs(group.items) do table.insert(options, o) end
+		end
+	end
+	button.options = options
+	button.value = nil
+	UI.OpenList(button)
+end
+
+function M:InsertCommand(text)
+	ns.Suggest:InsertAtCursor(text)
+	if ns.Gamepad.capturing then
+		-- Closing the list puts the controller's cursor back on its button a frame
+		-- later; land on the message box after that, where A sends.
+		C_Timer.After(0, function()
+			C_Timer.After(0, function()
+				if ns.Gamepad.capturing then ns.Gamepad:Highlight(self.composer) end
+			end)
+		end)
+	end
+end
+
 ---------------------------------------------------------------------------
 -- Screenshots and reports
 
@@ -871,7 +934,11 @@ function M:Refresh()
 	f.Bar.Mic.Icon:SetDesaturated(not canDictate)
 	f.Bar.Mic.Icon:SetVertexColor(self.dictating and 1 or 1, self.dictating and 0.3 or 1, self.dictating and 0.3 or 1)
 	f.Bar.Back:SetEnabled(self.mode == "new" or ns.viewId ~= nil or not f.Pages.threads.Left:IsShown())
+	local commands = ns.Store:Commands(self:NextProvider())
+	f.Bar.Insert:SetEnabled(commands ~= nil)
+	f.Bar.Insert.Icon:SetDesaturated(commands == nil)
 	self:UpdateCounter()
+	ns.Suggest:Sync()
 	ns.ThreadList:Refresh()
 	ns.Family:Refresh()
 	ns.Transcript:Refresh()
@@ -912,6 +979,22 @@ function M:ThreadModel(t)
 		end
 	end
 	return current
+end
+
+-- The machine and provider instance the next message goes to, or nil when no model
+-- is known. Threads on another machine use that machine's providers.
+function M:NextProvider()
+	local env, key
+	if self.mode == "new" then
+		env, key = ns.Store.EnvOf(self.newProject), self:NewThreadModel()
+	else
+		local t = ns.Store:Thread(ns.viewId)
+		if not t then return nil end
+		env, key = ns.Store.EnvOf(t.id), self:ThreadModel(t)
+	end
+	local instanceId = ns.Store.SplitModelKey(key)
+	if not instanceId then return nil end
+	return env, instanceId
 end
 
 -- Fill the model dropdown for what's on screen. Returns whether it's shown.
