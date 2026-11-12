@@ -557,6 +557,9 @@ test('markdown formatting', () => {
   assert.match(w, /fn\(\)/);
   // Characters the game's fonts lack would show as boxes.
   assert.equal(markdownToWow('game → bridge ✓ `a ≥ b` — done…'), 'game -> bridge OK |cffa8c7faa ≥ b|r — done…');
+  // Latin Extended letters lose their accents; Latin-1 ones (â î é) stay. Decomposed input too.
+  assert.equal(markdownToWow('Când împărțirea, ştiu Țară, Łódź, café'), 'Când împartirea, stiu Tara, Lódz, café');
+  assert.equal(markdownToWow('și ă'), 'si a');
   assert.equal(markdownToSpeech('**Done**: see [docs](http://x)'), 'Done : see docs');
 });
 
