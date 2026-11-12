@@ -1162,6 +1162,9 @@ do
 
 	-- A link that goes stale on its own clock, with no update arriving to say so, still
 	-- reaches the tracker: the once-a-second tick notices the state changed.
+	-- The notice shows only beside a thread, and the snapshot may have none running.
+	local savedThreads = ns.Store.data.threads
+	ns.Store.data.threads = { { id = "w1", title = "Working", s = "working", st = time() - 60, p = "p" } }
 	ns.Transport.bridgeNow = time() - 1000
 	ns.Tracker:RefreshTimers()
 	local found = false
@@ -1176,6 +1179,8 @@ do
 		if b._shown and b.Title:GetText():find("Connection lost", 1, true) then found = true end
 	end
 	check(not found, "and that it is back")
+	ns.Store.data.threads = savedThreads
+	ns.Tracker:Refresh()
 end
 
 -- Minimap button
