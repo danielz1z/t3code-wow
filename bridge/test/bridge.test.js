@@ -1005,6 +1005,12 @@ test('a subagent the provider started takes its status from its parent, where T3
   await b.refreshView('kid', true);
   await b.views.get('lead')?.inflight;
   assert.equal(view(b, 'kid').threads.find((r) => r.id === 'kid')?.s, 'working', 'opening the subagent loads its parent, so its own row is right too');
+  assert.equal(view(b, 'kid').fam.ro, true, 'a subagent its provider started takes no messages, so the game is told');
+  assert.equal(view(b, 'lead').fam?.ro, undefined, 'its parent does');
+  status = 'waiting';
+  b.client.view = 'lead';
+  await b.refreshView('lead', true);
+  assert.equal(view(b, 'lead').fam.kids[0].s, 'waiting', 'a subagent waiting on its own work shows as waiting');
   b.stop();
 });
 

@@ -585,6 +585,11 @@ function M:Send(textOverride)
 	local text = textOverride or self.composer:GetInputText() or ""
 	text = strtrim(text)
 	if text == "" then return end
+	local fam = self.mode ~= "new" and ns.Store:Family()
+	if fam and fam.ro then
+		ns.Print("This subagent is read only: it can't take messages. Message the thread that started it instead.")
+		return
+	end
 	if self.mode == "new" then
 		if not self.newProject then
 			ns.Print("Pick a project for the new thread first.")
@@ -905,7 +910,11 @@ function M:Refresh()
 			local buttons = subagent and 6 or ((t.s == "settled" or snoozable) and 200 or 110)
 			header.Text:SetPoint("RIGHT", -buttons - pickers, 0)
 			local busy = ns.db.settings.steerFollowUps and "Steer the agent" or "Queue a follow-up"
-			self:SetPlaceholder(((t.s == "working" or t.run) and busy or "Message the agent") .. "  (Shift+Enter for a new line)")
+			if fam and fam.ro then
+				self:SetPlaceholder("Read only: this subagent can't take messages.")
+			else
+				self:SetPlaceholder(((t.s == "working" or t.run) and busy or "Message the agent") .. "  (Shift+Enter for a new line)")
+			end
 		else
 			if ns.viewId then
 				-- Not in the list and its snapshot hasn't come yet: a relative just opened
@@ -927,6 +936,8 @@ function M:Refresh()
 		right.Hint:SetText(self:ShotHint() or (ns.Gamepad and ns.Gamepad:IsActive() and ns.Gamepad:HintText()) or "")
 	end
 	f.Bar.Stop:SetEnabled(t ~= nil and (t.s == "working" or t.run) and self.mode ~= "new")
+	local fam = self.mode ~= "new" and ns.Store:Family()
+	f.Bar.Send:SetEnabled(not (fam and fam.ro))
 	f.Bar.Stop.Icon:SetDesaturated(not f.Bar.Stop:IsEnabled())
 	local bridge = ns.Store.data.bridge
 	local canDictate = self.dictating or not (bridge and bridge.dictationHint)

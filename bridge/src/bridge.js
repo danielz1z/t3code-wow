@@ -36,7 +36,7 @@ const sec = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) : undefined);
 // in its hello, and a publish leaves out a part whose hash hasn't changed since.
 // T3 Code keeps the status of a subagent the provider started (Claude's own) on its
 // parent's projection; the subagent's thread stays idle while it runs.
-const SUBAGENT_STATUS = { running: 'working', failed: 'failed' };
+const SUBAGENT_STATUS = { pending: 'working', running: 'working', waiting: 'waiting', failed: 'failed' };
 
 const fingerprint = (value) => createHash('sha1').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
@@ -828,7 +828,8 @@ export class Bridge {
       const status = this.statusOf(t);
       const before = ev.prev ? this.statusOf(ev.prev) : this.prevStatus.get(t.id);
       this.prevStatus.set(t.id, status);
-      if (t.id === this.client?.view) this.refreshView(t.id);
+      // The open thread, or the parent an open subagent takes its status from.
+      if (t.id === this.client?.view || t.id === this.t3.threads.get(this.client?.view)?._from?.key) this.refreshView(t.id);
       else if (ACTIVE.has(status)) this.refreshView(t.id);
       if (before !== status) {
         this.markDirty('important');
@@ -1036,12 +1037,14 @@ export class Bridge {
       const s = this.statusOf(t);
       me = { ...threadRow(t, s, undefined, this.busyKids(t)), un: undefined, last: undefined, u: isRunning(t) ? undefined : sec(t.latestRunCompletedAt || t.createdAt) };
     }
-    if (!up && !kids.length && !me) return undefined;
+    if (!up && !kids.length && !me) return undefined;  // (a read-only subagent always has `up`)
     const home = t?._env || t3.split(viewId).env;
     const away = (env) => (env && env !== home ? escapeWow(t3.label(env)) : undefined);
     const title = (text) => escapeWow([...String(text || 'Untitled')].slice(0, 80).join(''));
     return {
       id: viewId,
+      // A subagent its provider started takes no messages; T3 Code's server refuses them.
+      ...(t?.lineage?.relationshipToParent === 'subagent' && t?.creationSource === 'provider' ? { ro: true } : {}),
       me,
       up: up ? { id: up.key || undefined, t: title(up.thread?.title ?? up.title), s: up.thread ? threadStatus(up.thread) : undefined, k: up.kind, env: away(up.env) } : undefined,
       kids: kids.length ? kids.map((k) => ({ id: k.id, t: title(k.title), s: this.statusOf(k), k: k._from.kind, env: away(k._env) })) : undefined,

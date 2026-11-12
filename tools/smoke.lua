@@ -814,12 +814,37 @@ do
 	ns.viewId = "e1~thread:delegated-task:" .. string.rep("s", 105)
 	Store.viewKey, Store.familyKey = hash, hash
 	check(T:Payload():find(string.rep("x", lo), 1, true) ~= nil, "the longest one accepted still fits once a subagent is open")
+	-- A Claude subagent's id is longer still (about 210 characters): a command that no
+	-- longer fits is dropped with a notice, so the commands behind it still go.
+	ns.viewId = "e1~thread:delegated-task:" .. string.rep("s", 185)
+	T:Send("read", "after-it")
+	local payload = T:Payload()
+	check(payload:find(string.rep("x", lo), 1, true) == nil and payload:find("after-it", 1, true) ~= nil and #T.queue == 1,
+		"a command outgrown by a long thread id is dropped, and the queue behind it goes on")
 	table.remove(T.queue)
 	ns.viewId = "00000000-0000-0000-0000-000000000000"
 	T:Send("send", ns.viewId, string.rep("x", 2000), "steer")
 	check(#T.queue == 1, "a 2,000-character message to an open thread still goes")
 	ns.viewId, T.queue = savedView, savedQueue
 	Store.listKey, Store.projectsKey, Store.viewKey, Store.familyKey = saved[1], saved[2], saved[3], saved[4]
+end
+
+-- A subagent its provider started takes no messages (T3 Code refuses them): the window
+-- says so and sends nothing.
+do
+	local savedFam, savedMode, wasShown = ns.Store.data.fam, ns.Main.mode, ns.Main.frame:IsShown()
+	ns.Main.frame:Show()
+	ns.Main.mode = "thread"
+	ns.Store.data.fam = { id = ns.viewId, ro = true, up = { t = "Lead", k = "sub" } }
+	ns.Main:Refresh()
+	check(not ns.Main.frame.Bar.Send:IsEnabled(), "Send is off for a read-only subagent")
+	local queued = #ns.Transport.queue
+	ns.Main:Send("hello?")
+	check(#ns.Transport.queue == queued, "and nothing is sent to it")
+	ns.Store.data.fam, ns.Main.mode = savedFam, savedMode
+	ns.Main:Refresh()
+	check(ns.Main.frame.Bar.Send:IsEnabled(), "Send comes back for an ordinary thread")
+	if not wasShown then ns.Main.frame:Hide() end
 end
 
 -- The family bar: the thread the open one came from, and the threads it started.

@@ -300,9 +300,9 @@ end
 
 -- A command that can't fit in a frame next to the hello would never go, and would
 -- hold up every command queued after it, so it's refused here. The hello grows after
--- a command is queued: its counters and flags, the thread picked (a subagent's id is
--- about 125 characters, 3 more on another machine) and a hash for each part it doesn't
--- hold yet. Leave room for all of that.
+-- a command is queued: its counters and flags, the thread picked and a hash for each
+-- part it doesn't hold yet. Leave room for that. (A subagent Claude started has an id of
+-- about 210 characters; one that still outgrows the room is dropped in T:Payload.)
 local LONGEST_ID, HASH_LEN, COUNTERS = 160, 16, 10
 
 local function HelloGrowth()
@@ -359,6 +359,16 @@ function T:Payload()
 	if not link then return hello end
 	local limit = Codec.MAX_PAYLOAD - Codec.SEAL_OVERHEAD
 	local parts, size = { hello }, #hello
+	-- A command too long to go even on its own, beside the hello as it is now (a long
+	-- thread id was opened after it was queued), would hold up the queue forever: drop it.
+	while self.queue[1] do
+		local cmd = self.queue[1]
+		local fields = { "C", cmd.id, cmd.verb }
+		for i = 1, #cmd.args do fields[#fields + 1] = cmd.args[i] end
+		if size + 1 + #Codec.Record(fields) <= limit then break end
+		table.remove(self.queue, 1)
+		ns:Fire("CommandResult", { id = cmd.id, ok = false, msg = "That was too long to send with this thread open. Shorten it and try again." })
+	end
 	for _, cmd in ipairs(self.queue) do
 		local fields = { "C", cmd.id, cmd.verb }
 		for i = 1, #cmd.args do fields[#fields + 1] = cmd.args[i] end
