@@ -234,15 +234,25 @@ function oneLine(text, max = 70) {
 // "$name". A skill that is also a slash command (Claude lists its skills as both) is
 // offered once, as the command. Disabled skills and those the player can't invoke
 // are left out.
+// The most suggestions sent per provider, and the longest description: the list rides
+// in every snapshot until the addon has it, so it's kept to a few KB.
+const MAX_COMMANDS = 200;
+const MAX_DESCRIPTION = 60;
+
 export function commandList(provider) {
   const out = [];
   const seen = new Set();
   const add = (prefix, name, description) => {
     name = typeof name === 'string' ? name.trim() : '';
-    if (!name || /\s/.test(name) || seen.has(name)) return;
-    seen.add(name);
+    // A skill can be a slash command too: it's offered under both, as in T3 Code, since
+    // only `$name` runs it anywhere in a message. `/usage-limits` opens a panel in T3
+    // Code; sent from the game it would only reach the agent as text.
+    const key = prefix + name.toLowerCase();
+    if (!name || /\s/.test(name) || seen.has(key) || out.length >= MAX_COMMANDS) return;
+    if (prefix === '/' && name === 'usage-limits') return;
+    seen.add(key);
     const entry = { t: escapeWow(prefix + name) };
-    const d = oneLine(description);
+    const d = oneLine(description, MAX_DESCRIPTION);
     if (d) entry.d = escapeWow(d);
     out.push(entry);
   };

@@ -1,6 +1,6 @@
 -- Suggestions above the message box, as in T3 Code's composer: "/" lists the provider's
--- slash commands and "$" its skills, filtered as you type. A pick is plain text; T3
--- runs "/name" wherever it sits in the message.
+-- slash commands and "$" its skills, filtered as you type. A pick is plain text. T3
+-- runs a skill named "$name" anywhere in the message; "/name" only at its start.
 
 local _, ns = ...
 

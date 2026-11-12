@@ -264,12 +264,13 @@ test('the model list is only sent while the addon reports a different one', () =
   b.stop();
 });
 
-test('the message box suggests each slash command once, then the skills the player can run', () => {
+test('the message box suggests the slash commands, then the skills the player can run, each once', () => {
   const list = commandList({
     slashCommands: [
       { name: 'compact', description: 'Summarize the conversation' },
       { name: 'review', description: 'Review | the diff' },
       { name: 'not a name', description: 'spaces' },
+      { name: 'usage-limits', description: 'Opens a panel in T3 Code' },
     ],
     skills: [
       { name: 'review', description: 'Also a slash command' },
@@ -280,14 +281,17 @@ test('the message box suggests each slash command once, then the skills the play
       { name: 'quiet' },
     ],
   });
-  assert.deepEqual(list.map((c) => c.t), ['/compact', '/review', '$deploy', '$wordy', '$quiet']);
+  // A skill that is also a slash command is offered as both: only `$review` runs it mid-message.
+  assert.deepEqual(list.map((c) => c.t), ['/compact', '/review', '$review', '$deploy', '$wordy', '$quiet']);
   assert.equal(list[1].d, 'Review || the diff', 'escaped for the game');
-  assert.equal(list[2].d, 'Ship it', 'the short description when there is one');
-  assert.equal(list[3].d.includes('\n'), false);
-  assert.ok(list[3].d.startsWith('First line second line x'));
-  assert.equal(Array.from(list[3].d).length, 70);
-  assert.ok(list[3].d.endsWith('…'));
-  assert.equal(list[4].d, undefined, 'no description, no field');
+  assert.equal(list[3].d, 'Ship it', 'the short description when there is one');
+  assert.equal(list[4].d.includes('\n'), false);
+  assert.ok(list[4].d.startsWith('First line second line x'));
+  assert.equal(Array.from(list[4].d).length, 60, 'descriptions are kept short');
+  assert.ok(list[4].d.endsWith('…'));
+  const many = commandList({ slashCommands: Array.from({ length: 500 }, (_, i) => ({ name: `c${i}` })) });
+  assert.equal(many.length, 200, 'the list is capped');
+  assert.equal(list[5].d, undefined, 'no description, no field');
   assert.deepEqual(commandList(undefined), []);
 });
 
