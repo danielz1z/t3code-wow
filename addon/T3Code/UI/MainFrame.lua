@@ -250,6 +250,7 @@ function M:CreateThreadsPage(page)
 	hint:SetPoint("BOTTOMLEFT", 10, 5)
 	right.Hint = hint
 
+	ns.Family:Create(right, header)
 	ns.Transcript:Create(right, header, composer)
 end
 
@@ -812,17 +813,22 @@ function M:Refresh()
 		header.Project:Hide()
 		f.Bar.Send:SetText("Send")
 		if t then
+			-- A subagent is run by the thread that started it, as in T3 Code, so it has
+			-- no Settle, Snooze or model of its own to pick here.
+			local fam = ns.Store:Family()
+			local subagent = fam and fam.up and fam.up.k == "sub" or false
 			f.Subtitle:SetText(t.title)
 			header.Text:SetText(self:HeaderText(t))
-			header.Action:SetShown(true)
+			header.Action:SetShown(not subagent)
 			header.Action:SetText(t.s == "settled" and "Reopen" or "Settle")
-			header.Archive:SetShown(t.s == "settled")
+			header.Archive:SetShown(not subagent and t.s == "settled")
 			-- Snooze shares Archive's place: a settled thread is archived, any other
 			-- snoozed. Without presets from the bridge there's nothing to offer.
-			local snoozable = t.s ~= "settled" and (t.s == "snoozed" or #self:SnoozeOptions() > 0)
+			local snoozable = not subagent and t.s ~= "settled" and (t.s == "snoozed" or #self:SnoozeOptions() > 0)
 			header.Snooze:SetShown(snoozable)
 			header.Snooze:SetText(t.s == "snoozed" and "Wake" or "Snooze")
-			local withModel = self:SetupModelDropdown()
+			local withModel = not subagent and self:SetupModelDropdown()
+			if not withModel then header.Model:Hide() end
 			local withEffort = withModel and self:SetupEffortDropdown()
 			if not withEffort then header.Effort:Hide() end
 			header.Model.tipBody = "The model for this thread. A change applies from the next reply on."
@@ -833,12 +839,22 @@ function M:Refresh()
 			header.Model:ClearAllPoints()
 			header.Model:SetPoint("RIGHT", withEffort and header.Effort or anchor, "LEFT", -4, 0)
 			local pickers = (withModel and header.Model:GetWidth() + 4 or 0) + (withEffort and header.Effort:GetWidth() + 4 or 0)
-			header.Text:SetPoint("RIGHT", ((t.s == "settled" or snoozable) and -200 or -110) - pickers, 0)
+			local buttons = subagent and 6 or ((t.s == "settled" or snoozable) and 200 or 110)
+			header.Text:SetPoint("RIGHT", -buttons - pickers, 0)
 			local busy = ns.db.settings.steerFollowUps and "Steer the agent" or "Queue a follow-up"
 			self:SetPlaceholder((t.s == "working" and busy or "Message the agent") .. "  (Shift+Enter for a new line)")
 		else
-			f.Subtitle:SetText(ns.Color("grey", "No thread selected"))
-			header.Text:SetText(ns.Color("grey", "Pick a thread on the left, or start a new one"))
+			if ns.viewId then
+				-- Not in the list and its snapshot hasn't come yet: a relative just opened
+				-- from the family bar shows what the family we hold says about it.
+				local rel = ns.Store:Relative(ns.viewId)
+				local status = rel and rel.s and (ns.Color(ns.Store.StatusColor(rel.s), ns.Store.StatusText(rel.s)) .. "  ·  ") or ""
+				f.Subtitle:SetText(rel and rel.t or ns.Color("grey", "Loading…"))
+				header.Text:SetText(status .. ns.Color("grey", "Loading…"))
+			else
+				f.Subtitle:SetText(ns.Color("grey", "No thread selected"))
+				header.Text:SetText(ns.Color("grey", "Pick a thread on the left, or start a new one"))
+			end
 			header.Action:Hide()
 			header.Archive:Hide()
 			header.Snooze:Hide()
@@ -857,6 +873,7 @@ function M:Refresh()
 	f.Bar.Back:SetEnabled(self.mode == "new" or ns.viewId ~= nil or not f.Pages.threads.Left:IsShown())
 	self:UpdateCounter()
 	ns.ThreadList:Refresh()
+	ns.Family:Refresh()
 	ns.Transcript:Refresh()
 end
 

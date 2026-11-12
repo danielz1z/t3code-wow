@@ -18,6 +18,7 @@ import { StripCapture } from './capture.js';
 import { SlotBank, replaceFile, FileInUse } from './slots.js';
 import { threadStatus, isUnread, effortOf, waitingOn } from './t3.js';
 import { Fleet } from './fleet.js';
+import { threadFamily } from './family.js';
 import { tokenProvider } from './auth.js';
 import { snoozeChoices, snoozedUntil, parseCustomSnooze, describeWhen } from './snooze.js';
 import { Voice } from './voice.js';
@@ -33,7 +34,20 @@ const sec = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) : undefined);
 
 // A short, stable hash of one part of a snapshot. The addon reports the ones it holds
 // in its hello, and a publish leaves out a part whose hash hasn't changed since.
+// T3 Code keeps the status of a subagent the provider started (Claude's own) on its
+// parent's projection; the subagent's thread stays idle while it runs.
+const SUBAGENT_STATUS = { running: 'working', failed: 'failed' };
+
 const fingerprint = (value) => createHash('sha1').update(JSON.stringify(value)).digest('hex').slice(0, 16);
+
+// The parts a publish may leave out while the addon holds them, in the order its hello
+// reports their hashes (fields 13 to 15). `letter` names the part in `x` and `same`.
+// The addon's Store.PARTS lists the same parts in the same order.
+const PARTS = [
+  { field: 'projects', letter: 'p' },
+  { field: 'view', letter: 'v' },
+  { field: 'fam', letter: 'f' },
+];
 
 const ACTIVE = new Set(['working', 'input', 'plan']);
 const ORDER = { input: 0, plan: 1, working: 2, waiting: 3, failed: 4, open: 5, snoozed: 6, settled: 7 };
@@ -166,6 +180,40 @@ export function proposedPlan(projection) {
   return plan ? plan.markdown : null;
 }
 
+function threadRow(t, s, proj) {
+  let label;
+  if (s === 'working') label = activityLabel(proj) || (t.status === 'queued' ? 'Queued' : 'Working');
+  else if (s === 'input') label = t.pendingRuntimeRequest?.kind === 'user_input' ? 'Needs your answer' : 'Needs your approval';
+  else if (s === 'waiting') label = waitingOn(t);
+  else if (s === 'plan') label = 'Plan ready';
+  else if (s === 'failed') label = t.lastError ? `Failed: ${String(t.lastError).slice(0, 60)}` : 'Failed';
+  else if (s === 'snoozed') label = 'Snoozed';
+  else if (s === 'settled') label = 'Settled';
+  else label = t.status === 'interrupted' ? 'Stopped' : 'Finished';
+  const last = proj ? lastAssistantText(proj) : t.latestVisibleMessage?.role === 'assistant' ? t.latestVisibleMessage.text : null;
+  return {
+    id: t.id,
+    title: escapeWow(t.title || 'Untitled'),
+    p: t.projectId,
+    s,
+    l: escapeWow(label),
+    // A working thread's update time changes with every tool call but isn't shown
+    // (the game shows elapsed time), so leave it out to avoid pointless publishes.
+    u: s === 'working' ? undefined : sec(t.updatedAt),
+    // Waiting counts from when the last run ended, as in T3's sidebar.
+    st: s === 'waiting' ? sec(t.latestRunCompletedAt) : sec(t.activityRunStartedAt || t.latestRunStartedAt),
+    un: s !== 'settled' && s !== 'snoozed' && isUnread(t) ? true : undefined,
+    // When a snoozed thread comes back.
+    w: s === 'snoozed' ? sec(t.snoozedUntil) : undefined,
+    br: t.branch ? escapeWow(t.branch) : undefined,
+    m: t.modelSelection?.model,
+    mi: t.modelSelection?.instanceId,
+    re: effortOf(t.modelSelection),
+    env: t._env && !t._env.local ? escapeWow(t._env.label) : undefined,
+    last: last && ACTIVE.has(s) === false && s !== 'settled' && s !== 'snoozed' ? escapeWow(firstLine(last, 160)) : undefined,
+  };
+}
+
 // How the game names a model: instance and slug, joined by a tab (neither contains one).
 export function modelKey(instanceId, model) {
   return `${instanceId}\t${model}`;
@@ -188,11 +236,10 @@ export function parseFrame(payload) {
         version: f[9] || '',
         slots: Number(f[10]) || 0,
         models: f[11] || '',
-        // What the addon already holds: the thread list, the project list and the
-        // transcript. A publish leaves those out when they haven't changed since.
+        // What the addon already holds: the thread list, and each of the PARTS, which
+        // a publish leaves out when they haven't changed since.
         list: f[12] || '',
-        projects: f[13] || '',
-        viewHash: f[14] || '',
+        hashes: Object.fromEntries(PARTS.map((p, i) => [p.field, f[13 + i] || ''])),
       };
     } else if (f[0] === 'C') {
       out.commands.push({ id: Number(f[1]), verb: f[2], args: f.slice(3) });
@@ -451,7 +498,7 @@ export class Bridge {
     // An unencrypted hello is only a bare hello: nothing in it is trusted.
     if (!sealed) c.hashes = {};
     else if (hello.gen >= this.lastGen) {
-      c.hashes = { list: hello.list, projects: hello.projects, view: hello.viewHash };
+      c.hashes = { list: hello.list, ...hello.hashes };
     }
     c.lastSeen = Date.now();
     this.persist.slotGuess = c.slotNext;
@@ -706,8 +753,13 @@ export class Bridge {
         const msgs = p.messages || [];
         const last = msgs.at(-1);
         v.contentKey = [msgs.length, last?.text?.length, last?.updatedAt, pendingRequest(p)?.id, proposedPlan(p)?.length, (p.runs || []).filter((r) => r.status === 'queued').length].join('|');
+        const prevSubs = v.subs;
+        v.subs = (p.subagents || []).map((a) => a.status).join();
         if (threadId === this.client?.view) this.markDirty(v.contentKey !== prevContent ? 'view' : 'minor');
-        else if (activityLabel(p) !== prevLabel) this.markDirty('minor');
+        else if (activityLabel(p) !== prevLabel || v.subs !== prevSubs) this.markDirty('minor');
+        // An open subagent's status lives on its parent, so keep the parent loaded too.
+        const up = this.t3.threads.get(threadId)?._from;
+        if (threadId === this.client?.view && up?.kind === 'sub' && up.key) this.refreshView(up.key);
       })
       .catch((err) => this.log(`thread ${threadId.slice(0, 8)}: ${err.message}`))
       .finally(() => {
@@ -819,39 +871,7 @@ export class Bridge {
     threads = threads.filter(({ s }) => s !== 'settled' || ++settled <= 30).slice(0, 90);
     const list = threads.map(({ t, s }) => {
       usedProjects.add(t.projectId);
-      const v = this.views.get(t.id);
-      const proj = v?.projection;
-      let label;
-      if (s === 'working') label = activityLabel(proj) || (t.status === 'queued' ? 'Queued' : 'Working');
-      else if (s === 'input') label = t.pendingRuntimeRequest?.kind === 'user_input' ? 'Needs your answer' : 'Needs your approval';
-      else if (s === 'waiting') label = waitingOn(t);
-      else if (s === 'plan') label = 'Plan ready';
-      else if (s === 'failed') label = t.lastError ? `Failed: ${String(t.lastError).slice(0, 60)}` : 'Failed';
-      else if (s === 'snoozed') label = 'Snoozed';
-      else if (s === 'settled') label = 'Settled';
-      else label = t.status === 'interrupted' ? 'Stopped' : 'Finished';
-      const last = proj ? lastAssistantText(proj) : t.latestVisibleMessage?.role === 'assistant' ? t.latestVisibleMessage.text : null;
-      return {
-        id: t.id,
-        title: escapeWow(t.title || 'Untitled'),
-        p: t.projectId,
-        s,
-        l: escapeWow(label),
-        // A working thread's update time changes with every tool call but isn't shown
-        // (the game shows elapsed time), so leave it out to avoid pointless publishes.
-        u: s === 'working' ? undefined : sec(t.updatedAt),
-        // Waiting counts from when the last run ended, as in T3's sidebar.
-        st: s === 'waiting' ? sec(t.latestRunCompletedAt) : sec(t.activityRunStartedAt || t.latestRunStartedAt),
-        un: s !== 'settled' && s !== 'snoozed' && isUnread(t) ? true : undefined,
-        // When a snoozed thread comes back.
-        w: s === 'snoozed' ? sec(t.snoozedUntil) : undefined,
-        br: t.branch ? escapeWow(t.branch) : undefined,
-        m: t.modelSelection?.model,
-        mi: t.modelSelection?.instanceId,
-        re: effortOf(t.modelSelection),
-        env: t._env && !t._env.local ? escapeWow(t._env.label) : undefined,
-        last: last && ACTIVE.has(s) === false && s !== 'settled' && s !== 'snoozed' ? escapeWow(firstLine(last, 160)) : undefined,
-      };
+      return threadRow(t, s, this.views.get(t.id)?.projection);
     });
     for (const p of t3.projects.values()) {
       if (p.archivedAt) continue;
@@ -906,6 +926,7 @@ export class Bridge {
         view = { id: viewId, loading: true };
       }
     }
+    const fam = viewId ? this.familySection(viewId, list.some((r) => r.id === viewId)) : undefined;
 
     const voice = this.voice.describe();
     const models = this.modelsSection();
@@ -935,6 +956,7 @@ export class Bridge {
       threads: list,
       older: t3.olderSettled || undefined,
       view,
+      fam,
       usage,
       dict: this.dictation,
       newShots: this.shots.get('new')?.length || undefined,
@@ -948,8 +970,46 @@ export class Bridge {
         l: fingerprint({ t: list, p: projects, o: t3.olderSettled || 0, e: t3.environments().map((e) => e.label) }),
         p: fingerprint(projects),
         v: view ? fingerprint(view) : '',
+        f: fam ? fingerprint(fam) : '',
       },
     };
+  }
+
+  // The open thread's family for the window: where it came from (`up`), the threads
+  // that came from it (`kids`), and its own row (`me`) when the list leaves it out, so
+  // an idle subagent still gets a header. Relatives carry only titles, statuses, kinds
+  // and machines, so neither a reply nor a child's tool call changes it. Absent when
+  // there's nothing to show.
+  familySection(viewId, listed) {
+    const t3 = this.t3;
+    const t = t3.threads.get(viewId);
+    const { up, kids } = threadFamily(t3.threads, viewId);
+    let me;
+    if (t && !listed) {
+      // Its list row without what changes while nothing shown does: the activity (no
+      // detail passed), the unread mark, the last reply, and the update time, for
+      // which the end of its last run stands in.
+      const s = this.statusOf(t);
+      me = { ...threadRow(t, s), un: undefined, last: undefined, u: s === 'working' ? undefined : sec(t.latestRunCompletedAt || t.createdAt) };
+    }
+    if (!up && !kids.length && !me) return undefined;
+    const home = t?._env || t3.split(viewId).env;
+    const away = (env) => (env && env !== home ? escapeWow(t3.label(env)) : undefined);
+    const title = (text) => escapeWow([...String(text || 'Untitled')].slice(0, 80).join(''));
+    return {
+      id: viewId,
+      me,
+      up: up ? { id: up.key || undefined, t: title(up.thread?.title ?? up.title), s: up.thread ? threadStatus(up.thread) : undefined, k: up.kind, env: away(up.env) } : undefined,
+      kids: kids.length ? kids.map((k) => ({ id: k.id, t: title(k.title), s: this.statusOf(k), k: k._from.kind, env: away(k._env) })) : undefined,
+    };
+  }
+
+  // A thread's status, with a provider-started subagent's taken from its loaded parent.
+  statusOf(t) {
+    const s = threadStatus(t);
+    const up = t._from?.kind === 'sub' && s === 'open' ? this.views.get(t._from.key)?.projection : null;
+    const id = up && this.t3.split(t.id).id;
+    return SUBAGENT_STATUS[up?.subagents?.find((a) => a.childThreadId === id)?.status] || s;
   }
 
   // Every machine's model list for the game's model picker, with a short hash the
@@ -1065,13 +1125,11 @@ export class Bridge {
   static slimSnapshot(snapshot, hashes = {}) {
     const same = [];
     const out = { ...snapshot };
-    if (out.projects && hashes.projects && snapshot.x.p === hashes.projects) {
-      delete out.projects;
-      same.push('p');
-    }
-    if (out.view && hashes.view && snapshot.x.v === hashes.view) {
-      delete out.view;
-      same.push('v');
+    for (const { field, letter } of PARTS) {
+      if (out[field] && hashes[field] && snapshot.x[letter] === hashes[field]) {
+        delete out[field];
+        same.push(letter);
+      }
     }
     if (same.length) out.same = same.join('');
     return out;
@@ -1175,9 +1233,8 @@ export class Bridge {
     // This publish carried a part the addon didn't say it had. Whether it applied it is
     // unknown until it speaks again, so don't leave that part out on a guess: if it
     // moves back to content the addon last reported, it must be sent, not assumed.
-    if (c?.hashes) {
-      if (c.hashes.view && snapshot.x.v !== c.hashes.view) c.hashes.view = null;
-      if (c.hashes.projects && snapshot.x.p !== c.hashes.projects) c.hashes.projects = null;
+    for (const { field, letter } of PARTS) {
+      if (c?.hashes?.[field] && snapshot.x[letter] !== c.hashes[field]) c.hashes[field] = null;
     }
     for (const r of this.results) r.sent = true;
     this.lastGen = gen;
@@ -1196,7 +1253,7 @@ export class Bridge {
       version: VERSION,
       pid: process.pid,
       at: new Date().toISOString(),
-      t3: { state: this.t3.state, error: this.t3.error, threads: this.t3.threads.size, origin: this.t3.origin, environments: this.t3.environments() },
+      t3: { state: this.t3.state, error: this.t3.error, threads: [...this.t3.threads.values()].filter((t) => !t.lineage?.parentThreadId).length, origin: this.t3.origin, environments: this.t3.environments() },
       wow: this.proc ? { pid: this.proc.pid } : null,
       capture: { state: this.captureState, backend: this.capture.resolveBackend(), ...this.capture.stats, lastError: this.capture.lastError },
       addon: this.client
