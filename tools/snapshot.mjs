@@ -13,7 +13,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't3snap-'));
 const bridge = new Bridge({ addonsDir: tmp, config: {}, log: () => {}, stateDir: tmp });
 bridge.t3.start();
 await new Promise((r) => setTimeout(r, 2500));
-const threads = [...bridge.t3.threads.values()].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+// A top-level thread: a subagent isn't in the list unless it's busy, and the smoke test needs the view's row.
+const threads = [...bridge.t3.threads.values()].filter((t) => !t.lineage?.parentThreadId).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 const viewId = viewArg === 'first' ? threads[0]?.id : viewArg;
 bridge.client = { session: 'test', ui: 'test', seq: 1, ackedSeq: -1, flags: 'o', view: viewId, slotNext: 1 };
 for (const t of threads.slice(0, 6)) await bridge.refreshView(t.id, true);
