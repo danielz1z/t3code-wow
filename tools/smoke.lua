@@ -1242,6 +1242,52 @@ do
 	ns.Tracker:Refresh()
 end
 
+-- An update from the bridge that doesn't answer what the strip says now.
+local function UpdateWithoutAnswer()
+	local d = ns.Store.data
+	ns.Transport:Apply({ gen = ns.db.gen + 1, now = time(), threads = d.threads, projects = d.projects, bridge = d.bridge, usage = d.usage, ack = { ui = ns.ui, seq = ns.Transport.ackedSeq } })
+end
+
+-- The bridge can't read the strip, so what the player clicks never arrives, although
+-- updates still do. After a few seconds without an answer, and an update since that
+-- shows the bridge is running, the status line says so, and it goes back once the
+-- bridge answers.
+do
+	ns.Transport:Acknowledge(ns.Transport.stripSeq)
+	ns.Transport.queue = {}
+	check(ns.Transport:BridgeState() == "connected", "connected, nothing waiting")
+	ns.Transport:Send("ping")
+	Stub.now = Stub.now + 3
+	check(ns.Transport:BridgeState() == "connected", "a few seconds without an answer is normal")
+	Stub.now = Stub.now + 6
+	check(ns.Transport:BridgeState() ~= "unheard" and ns.Main:StatusLine():find("can't hear", 1, true) == nil, "unanswered with no update since, the bridge may have stopped, so the strip isn't blamed")
+	UpdateWithoutAnswer()
+	check(ns.Transport:BridgeState() == "unheard" and ns.Main:StatusLine():find("can't hear the game", 1, true) ~= nil, "an update that arrives without the answer: the status line says T3 Code can't hear the game")
+	ns.Transport:Acknowledge(ns.Transport.stripSeq)
+	check(ns.Transport:BridgeState() == "connected" and ns.Main:StatusLine():find("can't hear", 1, true) == nil, "an answer clears it")
+end
+
+-- With T3 Code offline, that is what the player needs to know: an unanswered strip
+-- doesn't replace it, in the window or in the tracker.
+do
+	local bridge, thread = ns.Store.data.bridge, ns.Store.data.threads[1]
+	local t3, status, tracker = bridge.t3, thread.s, ns.db.settings.tracker
+	bridge.t3, thread.s, ns.db.settings.tracker = "offline", "working", true
+	ns.Transport:Send("ping")
+	Stub.now = Stub.now + 9
+	UpdateWithoutAnswer()
+	ns.Tracker:Refresh()
+	local lost = false
+	for _, line in ipairs(ns.Tracker.frame.Lines) do
+		if line:IsShown() and not line.thread and (line.Title:GetText() or ""):find("Connection lost", 1, true) then lost = true end
+	end
+	check(ns.Transport:BridgeState() == "t3offline" and lost and ns.Main:StatusLine():find("T3 Code is offline", 1, true) ~= nil,
+		"with T3 Code offline, an unanswered strip leaves the tracker's Connection lost and the status line as they were")
+	ns.Transport:Acknowledge(ns.Transport.stripSeq)
+	bridge.t3, thread.s, ns.db.settings.tracker = t3, status, tracker
+	ns.Tracker:Refresh()
+end
+
 -- Minimap button
 do
 	local mb = ns.MinimapButton.button

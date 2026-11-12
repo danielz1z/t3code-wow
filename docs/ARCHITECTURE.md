@@ -111,7 +111,13 @@ The strip is drawn only while something is unacknowledged. "Something" means a s
 change such as opening the window or switching threads, or a queued command. It is
 redrawn when content changes and hidden as soon as a snapshot acknowledges its
 sequence number, usually in under a second. If nothing answers for 20 s, it hides and
-retries with backoff.
+retries with backoff. Updates can keep arriving while the bridge can't read the strip,
+so the window would look connected while nothing the player clicks arrives. Once the
+strip has gone 8 s without an answer, and an update has arrived since it went up, which
+shows the bridge is running, the window's status line says T3 Code can't hear the game,
+with what to check, until an answer comes. Without such an update the bridge may just
+have stopped, and the window says so once its updates go stale. While T3 Code itself is offline,
+the window and the tracker say that instead.
 
 **macOS.** The bridge finds the game window in CoreGraphics' window list (through a JXA script run by `osascript`, so there's nothing to compile) and captures the corner with `screencapture -R`, which returns physical pixels on a Retina display. The strip can start below the window's top: under a windowed game's title bar, or below the notch of a MacBook display in fullscreen. So the decoder searches 40 extra points down instead of guessing either height. Both tools run as the bridge, which needs the Screen Recording permission; the bridge asks for it when it starts.
 

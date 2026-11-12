@@ -288,6 +288,7 @@ end
 
 function T:Touch()
 	self.lastTouchAt = GetTime()
+	self.unansweredSince = self.unansweredSince or GetTime()
 	self.stripSeq = (self.stripSeq + 1) % 65536
 	self.showSince = nil
 	self.hiddenUntil = nil
@@ -298,6 +299,7 @@ end
 function T:Acknowledge(seq)
 	if seq > self.ackedSeq or (self.ackedSeq > 60000 and seq < 1000) then
 		self.ackedSeq = seq
+		self.unansweredSince = GetTime() -- the bridge reads the strip
 	end
 	local remaining, changed = {}, false
 	for _, cmd in ipairs(self.queue) do
@@ -313,6 +315,7 @@ function T:Acknowledge(seq)
 	elseif self.ackedSeq >= self.stripSeq then
 		self:HideStrip()
 	end
+	if self.ackedSeq >= self.stripSeq and #self.queue == 0 then self.unansweredSince = nil end
 end
 
 -- A command that can't fit in a frame next to the hello would never go, and would
@@ -470,13 +473,21 @@ end
 ---------------------------------------------------------------------------
 -- Status for the UI
 
+local UNANSWERED = 8 -- seconds the bridge may leave the strip unanswered before we say so
+
 function T:BridgeState()
 	if self.exhausted then return "exhausted" end
 	if not self.lastData then return "waiting" end
 	local age = time() - (self.bridgeNow or 0)
 	local limit = ns.windowOpen and 200 or 900
 	if age > limit then return "stale" end
+	-- With T3 Code offline nothing sent could run anyway, so that is what to say first.
 	if ns.Store.data.bridge and ns.Store.data.bridge.t3 ~= "connected" then return "t3offline" end
+	-- Updates arrive, but what we draw goes unanswered: the bridge can't read the strip.
+	-- It takes an update since the strip went unanswered to show the bridge is running:
+	-- one that just stopped sends none, and goes stale in its own time.
+	local unanswered = self.unansweredSince
+	if unanswered and GetTime() - unanswered > UNANSWERED and (self.lastData or 0) > unanswered then return "unheard" end
 	return "connected"
 end
 
