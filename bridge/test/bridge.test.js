@@ -380,6 +380,86 @@ test('an addon that stays quiet through many updates hears every one, and nothin
   }
 });
 
+// The game playing bell k keeps its file open, and Windows won't let another program
+// replace a file that is open. Every way the bank changes a bell refuses that one.
+function holdBell(bank, k) {
+  const held = bank.bellFile(k);
+  const change = (file, rung) => {
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+    if (size === (rung ? LONG_SILENT_WAV.length : 0)) return;
+    if (file === held) throw new FileInUse(file);
+    fs.writeFileSync(file, rung ? LONG_SILENT_WAV : '');
+  };
+  bank.free = (n) => change(bank.bellFile(n - 4), false);
+  bank.raise = (n) => {
+    change(bank.bellFile(n - 4), false);
+    change(bank.bellFile(n), true);
+    return true;
+  };
+  return () => {
+    delete bank.free;
+    delete bank.raise;
+  };
+}
+
+test('an addon stuck on an old bell the game holds open is sent to the next bell, and that bell rings once it is let go', needsLua, (t) => {
+  const { b, dir } = fakeBridge(120);
+  t.after(() => b.stop());
+  b.persist.sigCounter = 7;
+  for (const k of [3, 4, 5, 6]) b.bank.raise(k);
+  // An addon reloaded where the bridge couldn't hear it: at slot 40, still listening
+  // from bell 3, which it plays every half second.
+  b.onFrame(frame(1, [['H', 1, 'sess', 'ui2', 40, 3, 0, '', '', '0.1.0']]));
+  const release = holdBell(b.bank, 3);
+  assert.equal(b.publishNow('test'), false, 'the update is still owed');
+  assert.equal(loadSlot(dir, 40).nextSig, 7, 'the slot it loads next sends it to bell 7, the next to ring');
+  assert.ok(rung(dir, 3) > 0, 'bell 3 is still rung');
+  assert.equal(rung(dir, 7), 0, 'bell 7 is not rung while bell 3, which bell 11 shares, cannot be emptied');
+  assert.equal(b.persist.sigCounter, 7);
+  release();
+  assert.ok(b.publishNow(), 'once the addon has moved on and the game lets go of bell 3');
+  assert.equal(rung(dir, 3), 0);
+  assert.ok(rung(dir, 7) > 0);
+  assert.equal(loadSlot(dir, 40).nextSig, 8);
+});
+
+test('a bell that cannot be rung is not named in the update', needsLua, (t) => {
+  const { b, dir } = fakeBridge();
+  t.after(() => b.stop());
+  b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 2, 1, 0, '', '', '0.1.0']]));
+  const release = holdBell(b.bank, 1);
+  assert.equal(b.publishNow('test'), false);
+  assert.equal(rung(dir, 1), 0);
+  for (const slot of [1, 2, 3]) assert.equal(loadSlot(dir, slot).nextSig, 1, `slot ${slot} sends the addon to bell 1, which hasn't rung`);
+  release();
+  assert.ok(b.publishNow('test'));
+  assert.ok(rung(dir, 1) > 0);
+  assert.equal(loadSlot(dir, 2).nextSig, 2);
+});
+
+test('an addon that loads an update just before its bell fails to ring listens past that bell, and hears the update after', needsLua, (t) => {
+  const { b, dir } = fakeBridge();
+  t.after(() => b.stop());
+  b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 2, 1, 0, '', '', '0.1.0']]));
+  const write = b.bank.write.bind(b.bank);
+  let read = null;
+  b.bank.write = (slots, snapshot) => {
+    const bytes = write(slots, snapshot);
+    if (read === null && slots.includes(2)) read = loadSlot(dir, 2).nextSig;
+    return bytes;
+  };
+  const release = holdBell(b.bank, 1);
+  assert.equal(b.publishNow('test'), false);
+  assert.equal(read, 2, 'the update it loaded, written before the ring, names bell 2');
+  for (const slot of [1, 2, 3]) assert.equal(loadSlot(dir, slot).nextSig, 1, `once the ring failed, slot ${slot} names bell 1 again`);
+  release();
+  b.bank.write = write;
+  assert.ok(b.publishNow('test'));
+  assert.ok(rung(dir, 1) > 0 && rung(dir, 2) === 0, 'the update goes out again with bell 1, which that addon no longer listens to');
+  assert.ok(b.publishNow('test'));
+  assert.ok(rung(dir, 2) > 0, 'the next update rings bell 2, the first it hears');
+});
+
 test('a drifted slot prediction still covers the slot the addon will load', needsLua, () => {
   const { b, dir } = fakeBridge(120);
   b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 40, 5, 0, 'o', '', '0.1.0']]));
