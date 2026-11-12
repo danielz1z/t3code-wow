@@ -46,3 +46,36 @@ test('KWin: hidden when minimized or on another desktop, visible on all desktops
   assert.equal(pickKwinWindow([kwin(5, 'World of Warcraft')], 5, 'd2').visible, false);
   assert.equal(pickKwinWindow([kwin(5, 'World of Warcraft', { desktops: [] })], 5, 'd2').visible, true);
 });
+
+test('window lookups slow down while the window stays put, and speed up when it changes', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 0 });
+  const cap = new StripCapture();
+  let current = { found: true, visible: true, x: 0, y: 0, width: 800, height: 600, scale: 1 };
+  let lookups = 0;
+  const lookup = async () => {
+    lookups++;
+    return { ...current };
+  };
+  // Lookups at each second for 40 seconds: how many reach the lookup?
+  const run = async (seconds) => {
+    lookups = 0;
+    for (let s = 0; s < seconds; s++) {
+      await cap.cachedWindow(7, lookup);
+      t.mock.timers.tick(1000);
+    }
+    return lookups;
+  };
+  assert.equal(await run(2), 1);
+  // Unchanged: 2 s, then 4 s, then 8 s at most.
+  assert.ok((await run(40)) <= 7);
+  // Moved: the next lookup that runs sees it, and goes back to every 2 seconds.
+  current = { ...current, x: 100 };
+  t.mock.timers.tick(8000);
+  assert.equal((await cap.cachedWindow(7, lookup)).x, 100);
+  assert.equal(cap.winCache.ttl, 2000);
+  // Hidden: stays at 2 seconds, so coming back is noticed quickly.
+  // (The first second still uses the lookup made just after the move.)
+  current = { ...current, visible: false };
+  assert.equal(await run(10), 4);
+  assert.equal(cap.winCache.ttl, 2000);
+});
