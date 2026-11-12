@@ -31,8 +31,11 @@ const WORKING = new Set(['preparing', 'queued', 'starting', 'running', 'waiting'
 export function threadStatus(t, now = Date.now()) {
   if (t.archivedAt || t.deletedAt) return 'archived';
   if (t.pendingRuntimeRequest) return 'input';
-  // Waiting on something (a subagent, a watched PR, another thread), even mid-run: T3
-  // lists these as "Waiting" under Working.
+  // As T3 Code's sidebar: a thread whose run goes on is Working, unless that run is
+  // blocked waiting on another thread. Pending work (a subagent, a background task, a
+  // watched PR) makes only a thread whose run has ended show as Waiting.
+  const blocked = t.blockedOnThreadWait && (t.activityRunStatus ?? t.status) === 'running';
+  if (isRunning(t) && !blocked) return 'working';
   if (waitingOn(t)) return 'waiting';
   if (isRunning(t)) return 'working';
   // Snoozed until a time still ahead: out of the way until then. A thread that needs

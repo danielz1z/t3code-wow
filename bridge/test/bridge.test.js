@@ -807,7 +807,7 @@ test('a thread waiting on a watched PR or another thread is waiting, not open', 
   assert.equal(threadStatus(t), 'waiting');
   assert.equal(waitingOn(t), 'Watching pull request #1');
   assert.equal(threadStatus({ ...t, pendingBackgroundTasks: [{ ...watch, awaited: false }] }), 'open');
-  assert.equal(threadStatus({ ...t, status: 'running', activityRunStatus: 'running' }), 'waiting', 'an awaited task makes a running thread wait, as in T3');
+  assert.equal(threadStatus({ ...t, status: 'running', activityRunStatus: 'running' }), 'working', 'while its run goes on a thread is Working, as in T3 Code');
   assert.equal(threadStatus({ ...t, pendingRuntimeRequest: { kind: 'approval' } }), 'input', 'needing the player wins');
 });
 
@@ -845,9 +845,9 @@ test('a waiting thread is listed with what it waits for, timed from the end of i
   assert.equal(t?.run, undefined, 'nothing is running to stop');
 });
 
-test('a thread waiting mid-run on its subagent can still be stopped, and churns no slots', () => {
+test('a thread whose run is blocked on another thread can still be stopped, and churns no slots', () => {
   const { b } = fakeBridge();
-  const base = { id: 'parent', title: 'Parent', projectId: 'p1', status: 'running', activityRunStatus: 'running', activityRunStartedAt: '2026-01-01T00:00:00Z',
+  const base = { id: 'parent', title: 'Parent', projectId: 'p1', status: 'running', activityRunStatus: 'running', activityRunStartedAt: '2026-01-01T00:00:00Z', blockedOnThreadWait: true,
     latestVisibleMessage: { role: 'assistant', text: 'Starting the subagent' }, pendingBackgroundTasks: [{ taskId: 'a1', description: 'Build bridge half', kind: 'subagent' }] };
   b.t3.threads.set('parent', { ...base, updatedAt: '2026-01-01T00:01:00Z' });
   const first = b.buildSnapshot().threads.find((x) => x.id === 'parent');
@@ -861,7 +861,7 @@ test('a thread waiting mid-run on its subagent can still be stopped, and churns 
 
 test('a subagent thread waiting on its own subagent stays listed', () => {
   const { b } = fakeBridge();
-  b.t3.threads.set('kid', { id: 'kid', title: 'Kid', projectId: 'p1', status: 'running', activityRunStatus: 'running', lineage: { parentThreadId: 't1' },
+  b.t3.threads.set('kid', { id: 'kid', title: 'Kid', projectId: 'p1', status: 'completed', lineage: { parentThreadId: 't1' },
     updatedAt: new Date().toISOString(), pendingBackgroundTasks: [{ taskId: 'g', kind: 'subagent' }] });
   assert.equal(b.buildSnapshot().threads.find((x) => x.id === 'kid')?.s, 'waiting');
 });
