@@ -1071,6 +1071,65 @@ Stub.Tick(0.6)
 Stub.Tick(0.2)
 check(Stub.loadCount == loads1 + 1, "cooldown: no slot burned by the same false alarm")
 
+-- An addon the bridge can't hear (one it didn't see reload, say) hears that bell again and
+-- again, with nothing new behind it, and its strip goes unanswered. Each such load waits
+-- longer than the last, up to two minutes, instead of spending a slot every few seconds.
+do
+	local loads0 = Stub.loadCount
+	for _ = 1, 600 do Stub.Tick(0.2) end
+	local spent = Stub.loadCount - loads0
+	check(spent <= 6 and ns.db.sigNext == 503, "a bell that keeps leading to old data costs " .. spent .. " slots in two minutes")
+	local waited = ns.Transport.ringCooldownUntil - Stub.now
+	ns.Transport:Send("ping")
+	Stub.Tick(0.6)
+	Stub.Tick(0.2)
+	check(waited > 30 and Stub.loadCount == loads0 + spent + 1, "the player sending something tries again at once")
+	Stub.slotData[ns.Transport.slotCursor] = freshFile
+	T3Code_Inbox = nil
+	ns.db.gen = 0
+	Stub.now = Stub.now + 4
+	Stub.Tick(0.6)
+	Stub.Tick(0.2)
+	check(Stub.loadCount == loads0 + spent + 2 and not ns.Transport.ringCooldownUntil, "news ends the waiting")
+	ns.Transport.queue = {}
+	ns.Transport:HideStrip()
+end
+
+-- Once the bridge hears the addon again, it answers with an update and rings for it.
+-- A ring fills one bell and empties the one four before it, so one of the four the
+-- addon listens to changes either way: that is news to try at once, however long the
+-- wait has grown. A bell that stays as it was waits as before.
+do
+	local function backOff()
+		Stub.validSounds = { [BellPath(504)] = true }
+		ns.Transport.bellProbe = nil
+		for _ = 1, 600 do Stub.Tick(0.2) end
+		return (ns.Transport.ringCooldownUntil or 0) - Stub.now
+	end
+	local function recovered(sounds)
+		local loads0 = Stub.loadCount
+		Stub.slotData[ns.Transport.slotCursor] = freshFile
+		T3Code_Inbox = nil
+		ns.db.gen = 0
+		Stub.validSounds = sounds
+		local t0 = Stub.now
+		repeat Stub.Tick(0.2) until Stub.loadCount > loads0 or Stub.now - t0 > 30
+		return Stub.now - t0, Stub.loadCount - loads0
+	end
+	local waited = backOff()
+	local took, loaded = recovered({ [BellPath(504)] = true, [BellPath(505)] = true })
+	check(waited > 30 and loaded == 1 and took < 2 and not ns.Transport.ringCooldownUntil and ns.db.gen > 0,
+		string.format("a bell rung for fresh data during a %.0f s wait is loaded after %.1f s", waited, took))
+	waited = backOff()
+	ns.Transport:HideStrip()
+	ns.Transport:Touch()
+	took, loaded = recovered({ [BellPath(508)] = true })
+	check(waited > 30 and loaded == 1 and took < 8 and not ns.Transport.ringCooldownUntil and ns.db.gen > 0,
+		string.format("so is the update behind a ring that emptied the bell it waited on, through the strip, after %.1f s", took))
+	ns.Transport.queue = {}
+	ns.Transport:HideStrip()
+end
+
 -- A laggy client: even the empty control still "plays" at check time. Wait it out
 -- instead of trusting the bells.
 Stub.now = Stub.now + 5
