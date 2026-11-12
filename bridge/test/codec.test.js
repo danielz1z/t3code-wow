@@ -115,7 +115,6 @@ test('the strip the addon draws is read through a window corner the desktop roun
   const { width, height } = StripCapture.stripPixels(4);
   for (const scale of [1, 1.25, 1.5, 1.75, 2]) {
     const corner = (x, y) => roundCorner(renderCells(cells, { cell: 3, ox: x, oy: y, width, height, background: [40, 90, 60] }), 8 * scale);
-    assert.equal(decodeImage(corner(0, 0)), null, `drawn in the very corner, the strip is lost at ${scale * 100}%`);
     const out = decodeImage(corner(ox, oy));
     assert.ok(out && !out.error, `read at ${scale * 100}%: ${out ? out.error : 'no strip found'}`);
     assert.equal(open(keys, out.seq, out.payload).toString().split('\x1e').at(-1), 'C\x1f1\x1fsend\x1fthread-42\x1frun the tests\x1fauto');

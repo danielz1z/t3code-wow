@@ -5,7 +5,8 @@
 // The Fletcher-16 checksum covers version..payload. Bytes are packed MSB-first into
 // 3-bit cells. Each cell is a CELL x CELL square of physical pixels whose R, G and B
 // channels are each fully on or off (bit 2 = R, bit 1 = G, bit 0 = B), laid out
-// row-major, CELLS_PER_ROW cells per row, starting at the top-left of the game's UI.
+// row-major, CELLS_PER_ROW cells per row, starting STRIP_INSET pixels in from the top-left
+// of the game's UI (clear of a rounded window corner).
 
 import zlib from 'node:zlib';
 
@@ -139,6 +140,18 @@ function headerAt(img, geo) {
 // border or misaligned capture shifts the origin a little). `searchY` widens the
 // vertical search, for captures that start above the game's content (a macOS title
 // bar).
+// The first offset that reads samples each cell's first pixel column and row. Move to
+// the middle of the offsets that read, so a blended cell edge or a little drift doesn't
+// flip a cell.
+function centred(img, geo) {
+  const run = (dx, dy) => {
+    let n = 1;
+    while (n < geo.cell && headerAt(img, { ...geo, ox: geo.ox + dx * n, oy: geo.oy + dy * n })) n++;
+    return n;
+  };
+  return { ...geo, ox: geo.ox + Math.floor((run(1, 0) - 1) / 2), oy: geo.oy + Math.floor((run(0, 1) - 1) / 2) };
+}
+
 export function locate(img, hint, { searchY = 0 } = {}) {
   if (hint && headerAt(img, hint)) return hint;
   for (let cell = 2; cell <= 8; cell++) {
@@ -146,7 +159,7 @@ export function locate(img, hint, { searchY = 0 } = {}) {
     for (let oy = 0; oy <= reach + searchY; oy++) {
       for (let ox = 0; ox <= reach; ox++) {
         const geo = { ox, oy, cell };
-        if (headerAt(img, geo)) return geo;
+        if (headerAt(img, geo)) return centred(img, geo);
       }
     }
   }

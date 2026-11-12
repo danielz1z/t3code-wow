@@ -75,8 +75,9 @@ and below the top-left corner of `UIParent`, on the TOOLTIP strata. Desktops tha
 window corners cut into that corner and draw a border along its edges: Windows 11 rounds
 by 8 pixels at 100 percent scaling and 16 at 200 percent, and Linux compositors can be
 set to round too. 9 pixels in, the strip's first cell is clear of a corner rounded by
-up to about 34 pixels, and bridges from before the inset, which look up to 9 pixels in,
-still find it. The bridge searches cell sizes 2–8 and offsets from the corner to a
+up to about 34 pixels. Bridges from before the inset look up to 9 pixels in, so they
+find it only when their capture starts at the game's corner; a border of a pixel or more
+(a windowed game on KDE Plasma, say) hides it from them until the bridge is updated. The bridge searches cell sizes 2–8 and offsets from the corner to a
 little past the inset, so a border or scaling quirk doesn't break it, and a strip an
 older addon draws in the corner itself is found too.
 
