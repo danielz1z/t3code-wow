@@ -436,7 +436,7 @@ export class T3Client extends EventEmitter {
     });
   }
 
-  // opts: { title, model ({ instanceId, model }), effort (a reasoning level id), runtimeMode ('full-access' | 'approval-required' | ...), interactionMode ('default' | 'plan') }
+  // opts: { title, model ({ instanceId, model }), effort (a reasoning level id), runtimeMode ('full-access' | 'approval-required' | ...), interactionMode ('default' | 'plan'), worktree (start in a fresh git worktree off the project's checkout) }
   launchThread(projectId, text, attachments = [], opts = {}) {
     const settings = this.config?.settings || {};
     const auto = this.defaultModelFor(projectId);
@@ -457,7 +457,9 @@ export class T3Client extends EventEmitter {
       modelSelection,
       runtimeMode: opts.runtimeMode || settings.defaultRuntimeMode || 'full-access',
       interactionMode: opts.interactionMode || 'default',
-      workspaceStrategy: { type: 'root' },
+      // A worktree thread gets its own checkout on its own branch (named by T3), based
+      // on what the project has checked out right now.
+      workspaceStrategy: opts.worktree ? { type: 'worktree', baseRef: 'HEAD' } : { type: 'root' },
       initialMessage: { messageId: randomUUID(), text, attachments },
     }, { timeout: 60000 });
   }

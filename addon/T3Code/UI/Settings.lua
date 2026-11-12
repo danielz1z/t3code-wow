@@ -15,6 +15,7 @@ local CHECKS = {
 	{ key = "quietInstances", label = "Stay quiet in dungeons, raids and PvP", tip = "Notices and read-aloud wait until you're out. They always wait during combat.", after = function() ns.Transport:Touch() end },
 	{ key = "autoRead", label = "Read finished replies aloud", after = function() ns.Transport:Touch() end },
 	{ key = "steerFollowUps", label = "Steer a working thread with follow-ups", tip = "A message to a thread that's still working goes into its current run, as in T3 Code. Turn this off to queue it until the run finishes.", after = function() ns.Main:Refresh() end },
+	{ key = "newWorktree", label = "Start new threads in a worktree", tip = "Each new thread gets its own git branch and checkout, so it can't collide with the project folder. T3 Code names the branch after the task." },
 	{ key = "dictateSend", label = "Send dictated messages right away" },
 	{ key = "quickReplies", label = "Show quick replies under finished threads", after = function() ns.Transcript:Refresh(true) end },
 	{ key = "gameMenu", label = "Add T3 Code to the game menu" },

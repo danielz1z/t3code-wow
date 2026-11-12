@@ -93,7 +93,7 @@ C  id  verb  args…                      (one per queued command)
   - `s`: sound signals unavailable
 - Verbs:
   - `send`, `new`, `stop`
-  - `model` (`threadId instanceId model [effort]`). `new` takes the same `instanceId model [effort]` after its text; without a model T3 Code's own default applies, and an empty `instanceId model` with an `effort` sets only the reasoning level on that default. `effort` is a level id from the model's list (`low`, `high`, …); without it the thread keeps the options last used with that model
+  - `model` (`threadId instanceId model [effort]`). `new` takes the same `instanceId model [effort]` after its text; without a model T3 Code's own default applies, and an empty `instanceId model` with an `effort` sets only the reasoning level on that default. `effort` is a level id from the model's list (`low`, `high`, …); without it the thread keeps the options last used with that model. `new` ends with an optional `worktree` (`1`): the thread starts in its own git worktree, a branch of its own based on the project's current checkout, named by T3 Code
   - `settle`, `unsettle`, `archive`, `read`
   - `approve`, `answer`
   - `speak`, `say`, `hush`, `dictate`

@@ -242,11 +242,21 @@ if hdr.Effort:IsShown() then
 else
 	check(false, "the reasoning picker shows for " .. pick.label)
 end
-ns.Main.composer._text = "Build a thing"
-ns.Main:Send()
-check(ns.Transport:Payload():find("\031new\031", 1, true) ~= nil, "new-thread command in payload")
-local pickI, pickS = ns.Store.SplitModelKey(pick.value)
-check(ns.Transport:Payload():find("Build a thing\031" .. pickI .. "\031" .. pickS .. (level and ("\031" .. level) or ""), 1, true) ~= nil, "picked model and level ride along with the new thread")
+do
+	local wt
+	for _, cb in ipairs(ns.Settings.checks or {}) do if cb.key == "newWorktree" then wt = cb end end
+	check(wt and not wt:GetChecked(), "worktree is a setting, off by default")
+	wt:SetChecked(true) -- the stub's Click runs the handler but doesn't flip the box
+	wt:Click()
+	check(ns.db.settings.newWorktree == true, "ticking the setting remembers worktree threads")
+	ns.Main.composer._text = "Build a thing"
+	ns.Main:Send()
+	local pickI, pickS = ns.Store.SplitModelKey(pick.value)
+	check(ns.Transport:Payload():find("Build a thing\031" .. pickI .. "\031" .. pickS .. "\031" .. (level or "") .. "\0311", 1, true) ~= nil, "the worktree setting rides along with the new thread")
+	wt:SetChecked(false)
+	wt:Click()
+	check(ns.db.settings.newWorktree == false, "unticking stops worktree threads")
+end
 ns.Transport:Apply({ gen = data.gen + 2, results = { { id = ns.Main.pendingNew, ok = true, open = firstThread.id } }, threads = data.threads, projects = data.projects, bridge = data.bridge, usage = data.usage, ack = { ui = ns.ui, seq = ns.Transport.stripSeq } })
 check(ns.Main.mode == "thread" and ns.viewId == firstThread.id, "result opened the new thread")
 check(#ns.Transport.queue == 0, "all commands acknowledged")

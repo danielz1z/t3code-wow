@@ -99,6 +99,7 @@ local DEFAULTS = {
 		minimapButton = true,
 		dictateSend = false,
 		steerFollowUps = true,
+		newWorktree = false,
 		quietInstances = true,
 		windowScale = "auto",
 		padChord = "auto",
