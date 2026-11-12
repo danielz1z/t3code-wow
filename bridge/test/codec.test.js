@@ -117,6 +117,7 @@ test('the strip the addon draws is read through a window corner the desktop roun
     const corner = (x, y) => roundCorner(renderCells(cells, { cell: 3, ox: x, oy: y, width, height, background: [40, 90, 60] }), 8 * scale);
     const out = decodeImage(corner(ox, oy));
     assert.ok(out && !out.error, `read at ${scale * 100}%: ${out ? out.error : 'no strip found'}`);
+    if (scale === 1) assert.deepEqual([out.geo.ox, out.geo.oy], [ox, oy], 'found at its own corner, so each cell is read at its centre');
     assert.equal(open(keys, out.seq, out.payload).toString().split('\x1e').at(-1), 'C\x1f1\x1fsend\x1fthread-42\x1frun the tests\x1fauto');
   }
 });
