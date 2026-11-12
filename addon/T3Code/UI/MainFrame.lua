@@ -842,7 +842,7 @@ function M:Refresh()
 			local buttons = subagent and 6 or ((t.s == "settled" or snoozable) and 200 or 110)
 			header.Text:SetPoint("RIGHT", -buttons - pickers, 0)
 			local busy = ns.db.settings.steerFollowUps and "Steer the agent" or "Queue a follow-up"
-			self:SetPlaceholder((t.s == "working" and busy or "Message the agent") .. "  (Shift+Enter for a new line)")
+			self:SetPlaceholder(((t.s == "working" or t.run) and busy or "Message the agent") .. "  (Shift+Enter for a new line)")
 		else
 			if ns.viewId then
 				-- Not in the list and its snapshot hasn't come yet: a relative just opened
@@ -863,7 +863,7 @@ function M:Refresh()
 		end
 		right.Hint:SetText(self:ShotHint() or (ns.Gamepad and ns.Gamepad:IsActive() and ns.Gamepad:HintText()) or "")
 	end
-	f.Bar.Stop:SetEnabled(t ~= nil and t.s == "working" and self.mode ~= "new")
+	f.Bar.Stop:SetEnabled(t ~= nil and (t.s == "working" or t.run) and self.mode ~= "new")
 	f.Bar.Stop.Icon:SetDesaturated(not f.Bar.Stop:IsEnabled())
 	local bridge = ns.Store.data.bridge
 	local canDictate = self.dictating or not (bridge and bridge.dictationHint)

@@ -761,10 +761,30 @@ test('a thread waiting on a watched PR or another thread is waiting, not open', 
   assert.equal(threadStatus(t), 'waiting');
   assert.equal(waitingOn(t), 'Watching pull request #1');
   assert.equal(threadStatus({ ...t, pendingBackgroundTasks: [{ ...watch, awaited: false }] }), 'open');
-  assert.equal(threadStatus({ status: 'completed', blockedOnThreadWait: true }), 'waiting');
-  assert.equal(threadStatus({ ...t, status: 'running', activityRunStatus: 'running' }), 'working', 'running wins');
+  assert.equal(threadStatus({ ...t, status: 'running', activityRunStatus: 'running' }), 'waiting', 'an awaited task makes a running thread wait, as in T3');
   assert.equal(threadStatus({ ...t, pendingRuntimeRequest: { kind: 'approval' } }), 'input', 'needing the player wins');
-  assert.equal(waitingOn({ ...t, status: 'running', activityRunStatus: 'running' }), null);
+});
+
+test('a running thread blocked on another thread is waiting, as in T3 Code', async () => {
+  const { threadStatus, waitingOn } = await import('../src/t3.js');
+  const t = { status: 'running', activityRunStatus: 'running', blockedOnThreadWait: true };
+  assert.equal(threadStatus(t), 'waiting');
+  assert.equal(waitingOn(t), 'Waiting on another thread');
+  assert.equal(threadStatus({ ...t, blockedOnThreadWait: false }), 'working');
+  assert.equal(threadStatus({ status: 'completed', blockedOnThreadWait: true }), 'open', 'the flag counts only during a run');
+});
+
+test('a thread waiting on its subagent or a background task is waiting, as in T3 Code', async () => {
+  const { threadStatus, waitingOn } = await import('../src/t3.js');
+  // The shape T3 Code sends: subagent and background tasks carry no awaited flag.
+  const subagent = { taskId: 'a1', description: 'Build bridge half', kind: 'subagent', providerInstanceId: 'claudeAgent' };
+  const t = { status: 'completed', pendingBackgroundTasks: [subagent] };
+  assert.equal(threadStatus(t), 'waiting');
+  assert.equal(waitingOn(t), 'Build bridge half');
+  assert.equal(threadStatus({ ...t, pendingBackgroundTasks: [{ taskId: 'b', kind: 'background_task' }] }), 'waiting');
+  assert.equal(threadStatus({ ...t, pendingBackgroundTasks: [{ taskId: 'c', kind: 'command' }] }), 'open', 'a background command is not waited on');
+  assert.equal(threadStatus({ ...t, pendingBackgroundTasks: [{ taskId: 'm', kind: 'monitor' }] }), 'open', 'nor is a monitor nobody awaits');
+  assert.equal(threadStatus({ ...t, status: 'failed' }), 'failed', 'a failed run shows as failed, not waiting');
 });
 
 test('a waiting thread is listed with what it waits for, timed from the end of its last run', () => {
@@ -776,6 +796,46 @@ test('a waiting thread is listed with what it waits for, timed from the end of i
   assert.equal(t?.s, 'waiting');
   assert.equal(t?.l, 'Watching pull request #7');
   assert.equal(t?.st, Date.parse('2026-01-01T00:05:00Z') / 1000, 'waiting counts from the end of the last run');
+  assert.equal(t?.run, undefined, 'nothing is running to stop');
+});
+
+test('a thread waiting mid-run on its subagent can still be stopped, and churns no slots', () => {
+  const { b } = fakeBridge();
+  const base = { id: 'parent', title: 'Parent', projectId: 'p1', status: 'running', activityRunStatus: 'running', activityRunStartedAt: '2026-01-01T00:00:00Z',
+    latestVisibleMessage: { role: 'assistant', text: 'Starting the subagent' }, pendingBackgroundTasks: [{ taskId: 'a1', description: 'Build bridge half', kind: 'subagent' }] };
+  b.t3.threads.set('parent', { ...base, updatedAt: '2026-01-01T00:01:00Z' });
+  const first = b.buildSnapshot().threads.find((x) => x.id === 'parent');
+  assert.equal(first?.s, 'waiting');
+  assert.equal(first?.run, true, 'the addon is told the run is still going');
+  assert.equal(first?.st, Date.parse('2026-01-01T00:00:00Z') / 1000, 'timed from the start of the run');
+  b.t3.threads.set('parent', { ...base, updatedAt: '2026-01-01T00:02:00Z', latestVisibleMessage: { role: 'assistant', text: 'Still going' } });
+  const second = b.buildSnapshot().threads.find((x) => x.id === 'parent');
+  assert.deepEqual(second, first, 'tool calls during the run change nothing the game is sent');
+});
+
+test('a subagent thread waiting on its own subagent stays listed', () => {
+  const { b } = fakeBridge();
+  b.t3.threads.set('kid', { id: 'kid', title: 'Kid', projectId: 'p1', status: 'running', activityRunStatus: 'running', lineage: { parentThreadId: 't1' },
+    updatedAt: new Date().toISOString(), pendingBackgroundTasks: [{ taskId: 'g', kind: 'subagent' }] });
+  assert.equal(b.buildSnapshot().threads.find((x) => x.id === 'kid')?.s, 'waiting');
+});
+
+test('a thread whose child threads still run is waiting on them, as in T3 Code', () => {
+  const { b } = fakeBridge();
+  const said = [];
+  b.announce = (t, status) => said.push(status);
+  const now = new Date().toISOString();
+  // T3 Code lists no pending task on the parent for a delegated child thread.
+  const lead = { id: 'lead', title: 'Lead', projectId: 'p1', status: 'completed', latestRunCompletedAt: '2026-01-01T00:05:00Z', updatedAt: now };
+  const kid = { id: 'kid', title: 'Kid', projectId: 'p1', status: 'running', activityRunStatus: 'running', lineage: { parentThreadId: 'lead' }, updatedAt: now };
+  b.t3.threads.set('lead', lead);
+  b.t3.threads.set('kid', kid);
+  b.onT3Change({ kind: 'thread', prev: { ...lead, status: 'running', activityRunStatus: 'running' }, thread: lead });
+  assert.deepEqual(said, [], 'the parent’s run ending while a child runs is not announced');
+  const row = () => b.buildSnapshot().threads.find((x) => x.id === 'lead');
+  assert.deepEqual([row().s, row().l, row().st], ['waiting', 'Waiting on 1 subagent', Date.parse('2026-01-01T00:05:00Z') / 1000]);
+  b.t3.threads.set('kid', { ...kid, status: 'completed', activityRunStatus: null });
+  assert.equal(row().s, 'open', 'done once its children are');
 });
 
 test('ending a turn into waiting is not announced; the wait ending is', async () => {
@@ -898,7 +958,7 @@ test('a subagent the provider started takes its status from its parent, where T3
   b.client.view = 'kid';
   await b.refreshView('kid', true);
   await b.views.get('lead')?.inflight;
-  assert.equal(view(b, 'kid').fam.me?.s, 'working', 'opening the subagent loads its parent, so its own header is right too');
+  assert.equal(view(b, 'kid').threads.find((r) => r.id === 'kid')?.s, 'working', 'opening the subagent loads its parent, so its own row is right too');
   b.stop();
 });
 

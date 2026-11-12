@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { RS, US } from './codec.js';
 import { StripCapture } from './capture.js';
 import { SlotBank, replaceFile, FileInUse } from './slots.js';
-import { threadStatus, isUnread, effortOf, waitingOn } from './t3.js';
+import { threadStatus, isUnread, effortOf, waitingOn, isRunning } from './t3.js';
 import { Fleet } from './fleet.js';
 import { threadFamily } from './family.js';
 import { tokenProvider } from './auth.js';
@@ -180,16 +180,17 @@ export function proposedPlan(projection) {
   return plan ? plan.markdown : null;
 }
 
-function threadRow(t, s, proj) {
+function threadRow(t, s, proj, kids = 0) {
   let label;
   if (s === 'working') label = activityLabel(proj) || (t.status === 'queued' ? 'Queued' : 'Working');
   else if (s === 'input') label = t.pendingRuntimeRequest?.kind === 'user_input' ? 'Needs your answer' : 'Needs your approval';
-  else if (s === 'waiting') label = waitingOn(t);
+  else if (s === 'waiting') label = waitingOn(t) || `Waiting on ${kids} subagent${kids === 1 ? '' : 's'}`;
   else if (s === 'plan') label = 'Plan ready';
   else if (s === 'failed') label = t.lastError ? `Failed: ${String(t.lastError).slice(0, 60)}` : 'Failed';
   else if (s === 'snoozed') label = 'Snoozed';
   else if (s === 'settled') label = 'Settled';
   else label = t.status === 'interrupted' ? 'Stopped' : 'Finished';
+  const running = isRunning(t);
   const last = proj ? lastAssistantText(proj) : t.latestVisibleMessage?.role === 'assistant' ? t.latestVisibleMessage.text : null;
   return {
     id: t.id,
@@ -197,11 +198,11 @@ function threadRow(t, s, proj) {
     p: t.projectId,
     s,
     l: escapeWow(label),
-    // A working thread's update time changes with every tool call but isn't shown
+    // A running thread's update time changes with every tool call but isn't shown
     // (the game shows elapsed time), so leave it out to avoid pointless publishes.
-    u: s === 'working' ? undefined : sec(t.updatedAt),
-    // Waiting counts from when the last run ended, as in T3's sidebar.
-    st: s === 'waiting' ? sec(t.latestRunCompletedAt) : sec(t.activityRunStartedAt || t.latestRunStartedAt),
+    u: running ? undefined : sec(t.updatedAt),
+    // Waiting between runs counts from when the last run ended, as in T3's sidebar.
+    st: s === 'waiting' && !running ? sec(t.latestRunCompletedAt) : sec(t.activityRunStartedAt || t.latestRunStartedAt),
     un: s !== 'settled' && s !== 'snoozed' && isUnread(t) ? true : undefined,
     // When a snoozed thread comes back.
     w: s === 'snoozed' ? sec(t.snoozedUntil) : undefined,
@@ -210,7 +211,9 @@ function threadRow(t, s, proj) {
     mi: t.modelSelection?.instanceId,
     re: effortOf(t.modelSelection),
     env: t._env && !t._env.local ? escapeWow(t._env.label) : undefined,
-    last: last && ACTIVE.has(s) === false && s !== 'settled' && s !== 'snoozed' ? escapeWow(firstLine(last, 160)) : undefined,
+    last: last && !running && ACTIVE.has(s) === false && s !== 'settled' && s !== 'snoozed' ? escapeWow(firstLine(last, 160)) : undefined,
+    // Still running while it waits (on its subagent, say): the player can stop or steer it.
+    run: s === 'waiting' && running ? true : undefined,
   };
 }
 
@@ -778,11 +781,20 @@ export class Bridge {
     return v.inflight;
   }
 
+  // How many of a thread's child threads still run (lineage ids carry the machine prefix).
+  busyKids(t) {
+    let n = 0;
+    for (const k of this.t3.threads.values()) {
+      if (k.lineage?.parentThreadId === t.id && (isRunning(k) || waitingOn(k))) n++;
+    }
+    return n;
+  }
+
   onT3Change(ev) {
     if (ev.kind === 'thread') {
       const t = ev.thread;
-      const status = threadStatus(t);
-      const before = ev.prev ? threadStatus(ev.prev) : this.prevStatus.get(t.id);
+      const status = this.statusOf(t);
+      const before = ev.prev ? this.statusOf(ev.prev) : this.prevStatus.get(t.id);
       this.prevStatus.set(t.id, status);
       if (t.id === this.client?.view) this.refreshView(t.id);
       else if (ACTIVE.has(status)) this.refreshView(t.id);
@@ -799,7 +811,7 @@ export class Bridge {
     } else {
       if (ev.kind === 'snapshot') {
         for (const t of this.t3.threads.values()) {
-          this.prevStatus.set(t.id, threadStatus(t));
+          this.prevStatus.set(t.id, this.statusOf(t));
           if (ACTIVE.has(threadStatus(t))) this.refreshView(t.id);
         }
       }
@@ -863,15 +875,15 @@ export class Bridge {
     const projects = [];
     const usedProjects = new Set();
     let threads = [...t3.threads.values()]
-      .map((t) => ({ t, s: threadStatus(t) }))
+      .map((t) => ({ t, s: this.statusOf(t) }))
       // Subagent threads only while they're busy, like T3's own sidebar.
-      .filter(({ t, s }) => s !== 'archived' && (!t.lineage?.parentThreadId || ACTIVE.has(s)));
+      .filter(({ t, s }) => s !== 'archived' && (!t.lineage?.parentThreadId || ACTIVE.has(s) || s === 'waiting'));
     threads.sort((a, b) => ORDER[a.s] - ORDER[b.s] || Date.parse(b.t.updatedAt) - Date.parse(a.t.updatedAt));
     let settled = 0;
     threads = threads.filter(({ s }) => s !== 'settled' || ++settled <= 30).slice(0, 90);
     const list = threads.map(({ t, s }) => {
       usedProjects.add(t.projectId);
-      return threadRow(t, s, this.views.get(t.id)?.projection);
+      return threadRow(t, s, this.views.get(t.id)?.projection, this.busyKids(t));
     });
     for (const p of t3.projects.values()) {
       if (p.archivedAt) continue;
@@ -990,7 +1002,7 @@ export class Bridge {
       // detail passed), the unread mark, the last reply, and the update time, for
       // which the end of its last run stands in.
       const s = this.statusOf(t);
-      me = { ...threadRow(t, s), un: undefined, last: undefined, u: s === 'working' ? undefined : sec(t.latestRunCompletedAt || t.createdAt) };
+      me = { ...threadRow(t, s, undefined, this.busyKids(t)), un: undefined, last: undefined, u: isRunning(t) ? undefined : sec(t.latestRunCompletedAt || t.createdAt) };
     }
     if (!up && !kids.length && !me) return undefined;
     const home = t?._env || t3.split(viewId).env;
@@ -1005,8 +1017,11 @@ export class Bridge {
   }
 
   // A thread's status, with a provider-started subagent's taken from its loaded parent.
+  // A thread whose own run is over while its child threads still run is waiting on
+  // them, as in T3 Code's sidebar. T3 Code doesn't say so on the thread itself.
   statusOf(t) {
     const s = threadStatus(t);
+    if (s === 'open' && this.busyKids(t)) return 'waiting';
     const up = t._from?.kind === 'sub' && s === 'open' ? this.views.get(t._from.key)?.projection : null;
     const id = up && this.t3.split(t.id).id;
     return SUBAGENT_STATUS[up?.subagents?.find((a) => a.childThreadId === id)?.status] || s;
