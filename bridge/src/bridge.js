@@ -502,13 +502,15 @@ export class Bridge {
           ok = null;
           break;
         case 'new': {
-          // new <project> <text> [<instanceId> <model> [<effort>]]; the model is
-          // empty when only the reasoning level was picked.
+          // new <project> <text> [<instanceId> <model> [<effort>]] [<worktree>]; the model
+          // is empty when only the reasoning level was picked, and worktree is "1" when
+          // the thread should start in its own git worktree.
           const attachments = await this.takeShots('new', a0);
-          const [, , instanceId, model, effort] = cmd.args;
+          const [, , instanceId, model, effort, worktree] = cmd.args;
           const opts = {};
           if (instanceId && model) opts.model = { instanceId, model };
           if (effort) opts.effort = effort;
+          if (worktree === '1') opts.worktree = true;
           const res = await this.t3.launchThread(a0, a1, attachments, opts);
           msg = 'Thread started';
           if (res?.threadId) this.results.push({ id: cmd.id, ok: true, open: res.threadId });

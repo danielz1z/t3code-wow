@@ -212,12 +212,14 @@ test('commands run once, in order, and results are published', async () => {
 test('a picked model rides along with new, and model switches a thread', async () => {
   const { b, calls } = fakeBridge();
   b.t3.setModel = async (...a) => calls.push(['model', ...a]);
-  b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 1, 1, 0, 'o', 't1', '0.1.0'], ['C', 1, 'new', 'p1', 'go', 'codex', 'gpt-x'], ['C', 2, 'new', 'p1', 'auto'], ['C', 3, 'model', 't1', 'codex', 'gpt-y'], ['C', 4, 'new', 'p1', 'hard', '', '', 'high'], ['C', 5, 'model', 't1', 'codex', 'gpt-y', 'low']]));
+  b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 1, 1, 0, 'o', 't1', '0.1.0'], ['C', 1, 'new', 'p1', 'go', 'codex', 'gpt-x'], ['C', 2, 'new', 'p1', 'auto'], ['C', 3, 'model', 't1', 'codex', 'gpt-y'], ['C', 4, 'new', 'p1', 'hard', '', '', 'high'], ['C', 5, 'model', 't1', 'codex', 'gpt-y', 'low'], ['C', 6, 'new', 'p1', 'branch it', 'codex', 'gpt-x', 'high', '1'], ['C', 7, 'new', 'p1', 'plain']]));
   await new Promise((r) => setTimeout(r, 20));
   const news = calls.filter((c) => c[0] === 'new');
   assert.deepEqual(news.find((c) => c[2] === 'go')[4], { model: { instanceId: 'codex', model: 'gpt-x' } });
   assert.deepEqual(news.find((c) => c[2] === 'auto')[4], {}, 'no pick: T3 picks as before');
   assert.deepEqual(news.find((c) => c[2] === 'hard')[4], { effort: 'high' }, 'only a level picked: on the default model');
+  assert.deepEqual(news.find((c) => c[2] === 'branch it')[4], { model: { instanceId: 'codex', model: 'gpt-x' }, effort: 'high', worktree: true }, 'the worktree flag rides along');
+  assert.deepEqual(news.find((c) => c[2] === 'plain')[4], {}, 'without the flag, no worktree');
   const models = calls.filter((c) => c[0] === 'model');
   assert.deepEqual(models[0], ['model', 't1', 'codex', 'gpt-y', undefined]);
   assert.deepEqual(models[1], ['model', 't1', 'codex', 'gpt-y', 'low']);

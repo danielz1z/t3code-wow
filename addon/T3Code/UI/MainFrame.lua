@@ -563,10 +563,11 @@ function M:Send(textOverride)
 		end
 		local instanceId, slug = ns.Store.SplitModelKey(self:ChosenNewModel())
 		local effort = self:ChosenNewEffort()
+		local worktree = ns.db.settings.newWorktree and "1" or nil
 		local id
-		if effort then
+		if effort or worktree then
 			-- An empty model means T3 Code's default, at this level.
-			id = ns.Transport:Send("new", self.newProject, text, instanceId or "", slug or "", effort)
+			id = ns.Transport:Send("new", self.newProject, text, instanceId or "", slug or "", effort or "", worktree)
 		else
 			id = ns.Transport:Send("new", self.newProject, text, instanceId, slug)
 		end
