@@ -116,8 +116,12 @@ function readCells(img, geo, start, n) {
 }
 
 const HEADER_CELLS = cellsForBytes(HEADER_BYTES);
+// The magic's first cell is fixed, so most positions are ruled out by one pixel.
+const FIRST_CELL = MAGIC[0] >> (8 - BITS);
 
 function headerAt(img, geo) {
+  const p = geo.pitch ?? geo.cell;
+  if (cellValueAt(img, geo.ox + Math.floor(p / 2), geo.oy + Math.floor(p / 2)) !== FIRST_CELL) return null;
   const cells = readCells(img, geo, 0, HEADER_CELLS);
   if (!cells) return null;
   const b = cellsToBytes(cells, HEADER_BYTES);
