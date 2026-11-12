@@ -1354,7 +1354,8 @@ export class Bridge {
       addon: this.client
         ? { ui: this.client.ui, version: this.client.version, flags: this.client.flags, view: this.client.view, slotNext: this.client.slotNext, lastSeen: this.client.lastSeen, encrypted: !!this.client.encrypted }
         : null,
-      slots: { total: this.bank.slots, remaining: this.remainingSlots() },
+      // Only the addon says where it is, so the count is known once it has.
+      slots: { total: this.bank.slots, remaining: this.client ? this.remainingSlots() : null },
       signals: { next: this.persist.sigCounter },
       rejected: { forged: this.rejected.forged, plainCommands: this.rejected.plainCommands },
       publishes: this.publishCount || 0,

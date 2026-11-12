@@ -194,6 +194,8 @@ with the window closed, and 2 per minute with it open.
 When few slots remain, intervals stretch 2–4×. When they run out, the addon offers
 `/reload`.
 
+Until it hears a hello, the bridge doesn't know where the addon is, so `t3code-wow status` says the number of updates left isn't known until it does. Those updates go at the pace for a closed window. An addon still in step with the last bridge loads them as before. One that reloaded where its strip can't be read starts again at slot 1, where nothing new is waiting after the first three: it loads a slot for each of these updates, the same as following them would cost, and none for a bell that stays rung (see the false alarms above).
+
 ## T3 Code side
 
 `t3.js` uses the same API as T3's own clients:

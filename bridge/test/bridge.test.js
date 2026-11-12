@@ -832,6 +832,33 @@ test('pacing: fast while reading, patient otherwise, reserve kept for alerts', (
   b.stop();
 });
 
+test('until it hears the addon, the bridge updates it as with the window closed, and says it does not know how many updates are left', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { b } = fakeBridge(600);
+  t.after(() => b.stop());
+  const status = () => {
+    b.writeStatus();
+    return JSON.parse(fs.readFileSync(b.statusFile, 'utf8'));
+  };
+  b.dirty.important = true;
+  assert.ok(b.nextPublishDelay() <= 300, 'the first goes out at once, for an addon still in step with the last bridge');
+  assert.ok(b.publishNow());
+  assert.equal(status().slots.remaining, null);
+  t.mock.timers.tick(1000);
+  b.dirty.important = true;
+  assert.ok(b.nextPublishDelay() <= 2000, `a thread finishing goes within a few seconds: ${b.nextPublishDelay()} ms`);
+  b.dirty = { important: false, minor: true, view: false };
+  assert.ok(b.nextPublishDelay() >= 55000, `an activity label waits about a minute: ${b.nextPublishDelay()} ms`);
+  b.dirty = { important: false, minor: false, view: false };
+  assert.equal(b.nextPublishDelay(), null, 'nothing changed, nothing sent');
+  b.onFrame(frame(1, [['H', 1, 'sess', 'ui1', 3, 2, 0, '', '', '0.1.0', '600']]));
+  assert.equal(status().slots.remaining, 598);
+  b.dirty.important = true;
+  b.client.ackedSeq = b.client.seq;
+  t.mock.timers.tick(1000);
+  assert.ok(b.nextPublishDelay() <= 3000, 'once heard, the usual pace');
+});
+
 test('a locked file backs the publish off instead of retrying in a loop', () => {
   const { b } = fakeBridge(600);
   const logs = [];
