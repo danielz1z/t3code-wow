@@ -173,6 +173,16 @@ function Stub.StripCells()
 	return out
 end
 
+-- Where the strip's top-left corner sits, as x, y offsets down and right from the game's
+-- top-left corner. The strip is scaled so that one of its units is one physical pixel.
+function Stub.StripOrigin()
+	local strip = _G.T3CodeLinkStrip
+	for _, pt in ipairs(strip and strip._points or {}) do
+		if pt[1] == "TOPLEFT" and pt[2] == _G.UIParent then return pt[4] or 0, -(pt[5] or 0) end
+	end
+	return 0, 0
+end
+
 function Stub.NewFrame(kind, parent, name, template)
 	local f = setmetatable({ _kind = kind, _scripts = {}, _parent = parent, _name = name, _shown = kind ~= "Frame" and nil or nil }, FrameMT)
 	-- Frames start shown in WoW unless hidden; track only explicit Show/Hide for OnShow.

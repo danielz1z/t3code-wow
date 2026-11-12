@@ -70,9 +70,15 @@ drive T3 Code's UI directly. Only install addons you trust.
 
 The frame is packed into 3-bit cells. Each cell is a 3×3-pixel square with R, G and B
 each fully on or off. The strip is 160 cells per row and up to 40 rows (about 2.4 KB),
-scaled so one UI unit is one physical pixel. It is anchored at the top-left of
-`UIParent` on the TOOLTIP strata. The bridge searches cell sizes 2–8 and small offsets,
-so a border or scaling quirk doesn't break it.
+scaled so one UI unit is one physical pixel. It is anchored 9 physical pixels right of
+and below the top-left corner of `UIParent`, on the TOOLTIP strata. Desktops that round
+window corners cut into that corner and draw a border along its edges: Windows 11 rounds
+by 8 pixels at 100 percent scaling and 16 at 200 percent, and Linux compositors can be
+set to round too. 9 pixels in, the strip's first cell is clear of a corner rounded by
+up to about 34 pixels, and bridges from before the inset, which look up to 9 pixels in,
+still find it. The bridge searches cell sizes 2–8 and offsets from the corner to a
+little past the inset, so a border or scaling quirk doesn't break it, and a strip an
+older addon draws in the corner itself is found too.
 
 The payload is records separated by `RS` (0x1E), with fields separated by `US` (0x1F):
 
@@ -221,7 +227,7 @@ Windows support is new. This section says how the bridge runs in the background 
 
 **One bridge at a time.** Two bridges would both read the same strip frame and run the same command, so a message could reach the agent twice. The supervisor records itself and its bridge in `running.json` in the state folder, each as a pid and a start time, because Windows gives a pid to another program once its process is gone. A new supervisor doesn't start while a recorded one is running. Install, restart and uninstall wait for the recorded supervisor and bridge to be gone before they start or delete anything, and end them after 8 seconds if they're still there.
 
-**What hides the strip.** A screen copy reads whatever is on screen. So before each copy the helper asks Windows which window is at 279 points over the strip: one every 16 pixels, and along the strip's far edges. If the window at any point isn't the game, the helper reads the game through `PrintWindow` instead. That catches every window at least 16 pixels wide and high over any part of the strip. A smaller window can sit between the points and hide part of the strip. An overlay that another program draws over the game's top-left corner, such as a frame-rate counter, also hides the strip while it's there, as on the other platforms. Windows doesn't report a click-through overlay as the window at a point, so the helper doesn't see one as covering.
+**What hides the strip.** A screen copy reads whatever is on screen. So before each copy the helper asks Windows which window is at 288 points over the strip, both where the addon draws it 9 pixels in and where older addons drew it in the corner: one every 16 pixels, and along the strip's far edges. If the window at any point isn't the game, the helper reads the game through `PrintWindow` instead. That catches every window at least 16 pixels wide and high over any part of the strip. A smaller window can sit between the points and hide part of the strip. An overlay that another program draws over the game's top-left corner, such as a frame-rate counter, also hides the strip while it's there, as on the other platforms. Windows doesn't report a click-through overlay as the window at a point, so the helper doesn't see one as covering.
 
 **A game that isn't responding.** `PrintWindow` waits for the game's own window thread, however long that takes. So a game window that isn't answering can't be read through it, and the helper can do nothing else while it waits. Once Windows reports the window as not responding, the helper doesn't call `PrintWindow`: a covered corner reads as hidden, and a screenshot is refused with that reason. Windows puts its own stand-in window over a game in that state, which counts as a cover. Windows takes 5 seconds to report it. A `PrintWindow` call made in those 5 seconds still waits, and the bridge's time limit on the request ends the helper if the game takes longer.
 
@@ -240,10 +246,12 @@ Windows support is new. This section says how the bridge runs in the background 
 - In game (Windows 11, a 3840x2160 HDR display at 100 percent scaling, Windowed mode): the bridge found the client and the addon connected with the link encrypted. In the first 19 minutes the bridge decoded 431 frames and rejected none. The bells rang: every publish raised one bell and the addon loaded one slot, and it never reported its self-test failing. Across 80 publishes no rename was refused. `read`, `model` and `send` from the game reached T3 Code, including a thread on a second machine.
 - With a small window over the strip corner, a grab went through `PrintWindow` in 33 to 41 ms and decoded. Uncovered, the screen copy took 4 to 11 ms.
 - While the game was minimized the bridge read it as hidden. The addon used 30 slots in those 10 minutes before its first hello was read.
+- In Windowed (Fullscreen) mode (the same display, 100 percent scaling, HDR on), with a tool that rounds every window's corners: the game window has no frame there, so its client area is the whole monitor, and its top-left corner was rounded by about 8 pixels, blended, black outside, with a 1-pixel grey border along the top row and the left column. Where the addon drew the strip then, in the corner itself, that blacked out its first cell: 181 of 181 screen copies over 75 s found no strip, although it was on screen with clean colours in every one. Read through `PrintWindow`, the same window decoded, so the game draws the strip whole and the corner is cut when Windows puts the window on the screen. `PrintWindow` took 52 ms per grab of the 3840x2160 window, and what that costs the game's frame time is unmeasured, so it isn't the way round this. In Windowed mode the rounded corners fall on the title bar, outside the client area, and the strip was read as before. With the strip drawn 9 pixels in from the corner (see the strip above), in the same mode with the same tool running, the addon connected with the link encrypted, and the bridge decoded 305 frames and rejected none.
 
 **Not checked in game yet.** Each of these needs a session in game, and the results belong here:
 
-- Whether the strip decodes in Windowed (Fullscreen) mode, with display scaling above 100 percent, and on a second monitor.
+- Whether the strip decodes with display scaling above 100 percent, and on a second monitor.
+- The helper's check for a window over the strip now looks at the 489 by 129 pixels from the client area's top-left, which take the strip drawn 9 pixels in. It compiles under Windows PowerShell 5.1, and `T3WOW_SCREEN_TEST` now puts a 16x16 window over only the strip's far end, but that check hasn't been run with the wider check yet.
 - Windows 10, and Windows on ARM.
 - Whether a message sent while another window covers the game's corner still arrives.
 - How the client opens slot and bell files, and how often a long session has a publish wait for one.

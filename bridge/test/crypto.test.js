@@ -24,6 +24,12 @@ const has = (bin) => {
 // returns unsigned ones like the game's. The addon must agree with Node under both.
 const LUAS = ['lua5.1', 'luajit'].filter(has);
 
+// The strip's cells as tools/strip_e2e.lua prints them, drawn where the addon puts them.
+function drawn(cells, origin) {
+  const [ox, oy] = origin.split(',').map(Number);
+  return renderCells([...cells].map(Number), { cell: 3, ox, oy });
+}
+
 function luaCrypto(lua, script) {
   const prelude = `dofile("tools/bitstub.lua") local ns = {} assert(loadfile("addon/T3Code/Core/Crypto.lua"))("T3Code", ns) local C = ns.Crypto
 local function hex(s) return C.ToHex(s) end local function raw(h) return C.FromHex(h) end `;
@@ -79,9 +85,9 @@ for (const lua of LUAS) {
     const slot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 't3wow-slot-')), 'Inbox.lua');
     fs.writeFileSync(slot, luaAssignment('T3Code_Inbox', { v: 1, gen: 5, now: 1, nextSig: 1, key: keys.hex, threads: [], projects: [], usage: [], bridge: {} }));
     const secret = 'please refactor the payment flow';
-    const [cells, mode] = execFileSync(lua, ['tools/strip_e2e.lua', 'addon/T3Code', slot, 'thread-42', secret], { cwd: root }).toString().trim().split('\n');
+    const [cells, mode, origin] = execFileSync(lua, ['tools/strip_e2e.lua', 'addon/T3Code', slot, 'thread-42', secret], { cwd: root }).toString().trim().split('\n');
     assert.equal(mode, 'encrypted');
-    const frame = decodeImage(renderCells([...cells].map(Number), { cell: 3 }));
+    const frame = decodeImage(drawn(cells, origin));
     assert.equal(frame.version, 2);
     assert.ok(!frame.payload.includes(Buffer.from(secret)), 'prompt not visible in the strip');
     assert.ok(!frame.payload.includes(Buffer.from('thread-42')), 'thread id not visible');
@@ -96,9 +102,9 @@ for (const lua of LUAS) {
   test(`addon strip without keys: a bare hello, no commands (${lua})`, () => {
     const slot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 't3wow-slot-')), 'Inbox.lua');
     fs.writeFileSync(slot, 'T3Code_Inbox = nil\n');
-    const [cells, mode] = execFileSync(lua, ['tools/strip_e2e.lua', 'addon/T3Code', slot, 'thread-42', 'secret'], { cwd: root }).toString().trim().split('\n');
+    const [cells, mode, origin] = execFileSync(lua, ['tools/strip_e2e.lua', 'addon/T3Code', slot, 'thread-42', 'secret'], { cwd: root }).toString().trim().split('\n');
     assert.equal(mode, 'plain');
-    const frame = decodeImage(renderCells([...cells].map(Number), { cell: 3 }));
+    const frame = decodeImage(drawn(cells, origin));
     assert.equal(frame.version, 1);
     const { hello, commands } = parseFrame(frame.payload);
     assert.equal(hello.view, '');

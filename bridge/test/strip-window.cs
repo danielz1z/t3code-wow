@@ -13,7 +13,9 @@ namespace T3CodeWow {
     [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
 
-    const int CELL = 3, CELLS_PER_ROW = 160;
+    // Drawn where the addon draws it: INSET pixels right of and below the client area's
+    // top-left.
+    const int CELL = 3, CELLS_PER_ROW = 160, INSET = 9;
     const int WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
 
     class Quiet : Form {
@@ -46,7 +48,7 @@ namespace T3CodeWow {
       game.BackColor = Color.FromArgb(40, 40, 48);
       game.Paint += delegate(object sender, PaintEventArgs e) {
         for (int i = 0; i < cells.Length; i++) {
-          e.Graphics.FillRectangle(colours[cells[i] - '0'], (i % CELLS_PER_ROW) * CELL, (i / CELLS_PER_ROW) * CELL, CELL, CELL);
+          e.Graphics.FillRectangle(colours[cells[i] - '0'], INSET + (i % CELLS_PER_ROW) * CELL, INSET + (i / CELLS_PER_ROW) * CELL, CELL, CELL);
         }
       };
 

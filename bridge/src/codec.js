@@ -18,6 +18,11 @@ export const MAX_ROWS = 40;
 export const HEADER_BYTES = 7;
 export const MAX_PAYLOAD = Math.floor((CELLS_PER_ROW * MAX_ROWS * BITS) / 8) - HEADER_BYTES - 2;
 
+// Where the addon draws the strip: this many physical pixels in from the game's
+// top-left corner, across and down, clear of a window corner the desktop rounds.
+// Older addons drew it in the corner itself; both are found.
+export const STRIP_INSET = 9;
+
 export const US = '\x1f'; // field separator
 export const RS = '\x1e'; // record separator
 
@@ -130,14 +135,16 @@ function headerAt(img, geo) {
 }
 
 // Find the strip. Tries the last known geometry first, then searches cell sizes and
-// small offsets (a window border or misaligned capture shifts the origin a little).
-// `searchY` widens the vertical search, for captures that start above the game's
-// content (a macOS title bar).
+// offsets from the corner up to the addon's inset and a little past it (a window
+// border or misaligned capture shifts the origin a little). `searchY` widens the
+// vertical search, for captures that start above the game's content (a macOS title
+// bar).
 export function locate(img, hint, { searchY = 0 } = {}) {
   if (hint && headerAt(img, hint)) return hint;
   for (let cell = 2; cell <= 8; cell++) {
-    for (let oy = 0; oy <= cell * 3 + searchY; oy++) {
-      for (let ox = 0; ox <= cell * 3; ox++) {
+    const reach = STRIP_INSET + cell * 3;
+    for (let oy = 0; oy <= reach + searchY; oy++) {
+      for (let ox = 0; ox <= reach; ox++) {
         const geo = { ox, oy, cell };
         if (headerAt(img, geo)) return geo;
       }
