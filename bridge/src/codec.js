@@ -116,8 +116,12 @@ function readCells(img, geo, start, n) {
 }
 
 const HEADER_CELLS = cellsForBytes(HEADER_BYTES);
+// The magic's first cell is fixed, so most positions are ruled out by one pixel.
+const FIRST_CELL = MAGIC[0] >> (8 - BITS);
 
 function headerAt(img, geo) {
+  const p = geo.pitch ?? geo.cell;
+  if (cellValueAt(img, geo.ox + Math.floor(p / 2), geo.oy + Math.floor(p / 2)) !== FIRST_CELL) return null;
   const cells = readCells(img, geo, 0, HEADER_CELLS);
   if (!cells) return null;
   const b = cellsToBytes(cells, HEADER_BYTES);
@@ -254,6 +258,20 @@ export function parseBMP(buf) {
   const bytes = bpp / 8;
   const shifts = masks.map((m) => 31 - Math.clz32(m & -m));
   const data = Buffer.alloc(width * height * 3);
+  if (masks[0] === 0x00ff0000 && masks[1] === 0x0000ff00 && masks[2] === 0x000000ff) {
+    // The usual layout: each pixel is B, G, R bytes (then X at 32 bits). Copy bytes
+    // directly; reading every pixel as a number is several times slower.
+    for (let y = 0; y < height; y++) {
+      let i = dataOffset + (topDown ? y : height - 1 - y) * stride;
+      let o = y * width * 3;
+      for (let x = 0; x < width; x++, i += bytes, o += 3) {
+        data[o] = buf[i + 2];
+        data[o + 1] = buf[i + 1];
+        data[o + 2] = buf[i];
+      }
+    }
+    return { width, height, data };
+  }
   for (let y = 0; y < height; y++) {
     const row = dataOffset + (topDown ? y : height - 1 - y) * stride;
     for (let x = 0; x < width; x++) {

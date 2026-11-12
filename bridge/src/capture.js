@@ -296,12 +296,15 @@ export class StripCapture {
     return { width: CELLS_PER_ROW * cell + 32, height: MAX_ROWS * cell + 32 };
   }
 
-  // The game window, looked up at most every 2 seconds.
+  // The game window, looked up every 2 seconds, or less often while it stays put: each
+  // lookup that finds it visible and unchanged doubles the wait, up to 8 seconds. A
+  // change, or a hidden window, goes back to 2 seconds so a return to the game is quick.
   async cachedWindow(pid, lookup) {
     const c = this.winCache;
-    if (c && c.pid === pid && Date.now() - c.at < 2000) return c.win;
+    if (c && c.pid === pid && Date.now() - c.at < c.ttl) return c.win;
     const win = await lookup(pid);
-    this.winCache = { pid, at: Date.now(), win };
+    const same = c && c.pid === pid && win.found && win.visible && JSON.stringify(win) === JSON.stringify(c.win);
+    this.winCache = { pid, at: Date.now(), win, ttl: same ? Math.min(c.ttl * 2, 8000) : 2000 };
     return win;
   }
 

@@ -98,7 +98,7 @@ test('parse ppm', () => {
 });
 
 // A BMP like macOS screencapture writes: 32-bit with bitfields, or plain 24-bit, either row order.
-function toBMP(img, { bpp = 32, topDown = false } = {}) {
+function toBMP(img, { bpp = 32, topDown = false, rgbOrder = false } = {}) {
   const stride = Math.ceil((img.width * bpp) / 32) * 4;
   const header = bpp === 32 ? 54 + 12 : 54;
   const b = Buffer.alloc(header + stride * img.height);
@@ -112,15 +112,16 @@ function toBMP(img, { bpp = 32, topDown = false } = {}) {
   b.writeUInt16LE(bpp, 28);
   b.writeUInt32LE(bpp === 32 ? 3 : 0, 30);
   if (bpp === 32) {
-    b.writeUInt32LE(0x00ff0000, 54);
+    b.writeUInt32LE(rgbOrder ? 0x000000ff : 0x00ff0000, 54);
     b.writeUInt32LE(0x0000ff00, 58);
-    b.writeUInt32LE(0x000000ff, 62);
+    b.writeUInt32LE(rgbOrder ? 0x00ff0000 : 0x000000ff, 62);
   }
   for (let y = 0; y < img.height; y++) {
     const row = header + (topDown ? y : img.height - 1 - y) * stride;
     for (let x = 0; x < img.width; x++) {
       const [r, g, bl] = img.data.subarray((y * img.width + x) * 3, (y * img.width + x) * 3 + 3);
-      if (bpp === 32) b.writeUInt32LE(((0xff << 24) | (r << 16) | (g << 8) | bl) >>> 0, row + x * 4);
+      if (bpp === 32 && rgbOrder) b.writeUInt32LE(((0xff << 24) | (bl << 16) | (g << 8) | r) >>> 0, row + x * 4);
+      else if (bpp === 32) b.writeUInt32LE(((0xff << 24) | (r << 16) | (g << 8) | bl) >>> 0, row + x * 4);
       else b.set([bl, g, r], row + x * 3);
     }
   }
@@ -130,7 +131,7 @@ function toBMP(img, { bpp = 32, topDown = false } = {}) {
 test('BMP captures decode like PPM ones', () => {
   const cells = encodeFrame(7, 'hello from macOS');
   const img = renderCells(cells, { cell: 6, ox: 1, oy: 2, width: 161 * 6 + 3, height: 30 });
-  for (const opts of [{ bpp: 32 }, { bpp: 32, topDown: true }, { bpp: 24 }]) {
+  for (const opts of [{ bpp: 32 }, { bpp: 32, topDown: true }, { bpp: 24 }, { bpp: 32, rgbOrder: true }]) {
     const back = parseBMP(toBMP(img, opts));
     assert.deepEqual([back.width, back.height], [img.width, img.height]);
     assert.ok(back.data.equals(img.data), `pixels differ for ${JSON.stringify(opts)}`);
